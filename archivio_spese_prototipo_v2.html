@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f2937">
+<title>Archivio spese</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f3f4f6;color:#111827}
+.wrap{max-width:520px;margin:auto;padding:18px}.card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 3px 14px #0001;margin-bottom:14px}
+h1{font-size:24px;margin:3px 0}.sub{color:#6b7280;margin:0 0 18px}
+button{width:100%;border:0;border-radius:14px;padding:15px;font-size:17px;font-weight:700;margin:5px 0;cursor:pointer}
+.photo{background:#111827;color:#fff}.voice{background:#e5e7eb}.stop{background:#dc2626;color:#fff}.confirm{background:#2563eb;color:#fff}.reset{background:#f3f4f6}
+input{width:100%;padding:13px;border:1px solid #d1d5db;border-radius:11px;font-size:17px;margin:5px 0 10px}
+label{font-size:14px;font-weight:700;color:#4b5563}#preview{width:100%;max-height:330px;object-fit:contain;border-radius:12px;margin-top:10px;display:none;background:#f9fafb}
+.status{padding:13px;border-radius:12px;background:#f9fafb;white-space:pre-line}.ok{background:#ecfdf5;color:#065f46}.warn{background:#fffbeb;color:#92400e}.listen{background:#eff6ff;color:#1e40af}
+.small{font-size:13px;color:#6b7280;line-height:1.45}.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>📒 Archivio spese</h1>
+<p class="sub">Prototipo v2 — foto + voce</p>
+
+<div class="card">
+<button class="photo" onclick="document.getElementById('camera').click()">📷 SCATTA FOTO</button>
+<input id="camera" type="file" accept="image/*" capture="environment" class="hidden">
+<img id="preview" alt="Anteprima">
+
+<button class="voice" id="voiceBtn">🎙️ PARLA</button>
+<button class="stop hidden" id="stopBtn">⏹ STOP</button>
+<p class="small">Prova: «Carburante, 63 euro» oppure «Ristorante, 38,50».</p>
+</div>
+
+<div class="card">
+<label for="categoria">Categoria / descrizione</label>
+<input id="categoria" placeholder="es. Carburante">
+<label for="valore">Valore (€)</label>
+<input id="valore" inputmode="decimal" placeholder="es. 63,50">
+<button class="confirm" onclick="conferma()">✅ CONFERMA</button>
+<button class="reset" onclick="azzera()">↺ Azzera</button>
+</div>
+
+<div class="card"><div id="status" class="status">In attesa.</div></div>
+
+<div class="card">
+<b>Nota</b>
+<p class="small">Per usare il microfono, questa pagina dovrà essere aperta tramite HTTPS. Il collegamento a Google Foto e Google Drive verrà aggiunto dopo il test.</p>
+</div>
+</div>
+
+<script>
+const camera=document.getElementById('camera'),preview=document.getElementById('preview');
+const categoria=document.getElementById('categoria'),valore=document.getElementById('valore');
+const statusBox=document.getElementById('status'),voiceBtn=document.getElementById('voiceBtn'),stopBtn=document.getElementById('stopBtn');
+let recognition=null, listening=false, gotResult=false;
+
+camera.addEventListener('change',()=>{
+ const f=camera.files[0]; if(!f)return;
+ preview.src=URL.createObjectURL(f); preview.style.display='block';
+ statusBox.textContent='📷 Foto acquisita. Ora puoi parlare.';
+ statusBox.className='status';
+});
+
+function parseComando(testo){
+ testo=testo.trim();
+ let cat='',val='';
+ const comma=testo.match(/^(.+?)\s*,\s*(.+)$/);
+ if(comma){cat=comma[1].trim();val=comma[2].trim();}
+ else{
+   const m=testo.match(/^(.+?)\s+(-?\d+(?:[.,]\d+)?)\s*(?:euro|€)?$/i);
+   if(m){cat=m[1].trim();val=m[2];}
+ }
+ val=val.replace(/euro/ig,'').replace(/€/g,'').trim();
+ val=val.replace(/\.(?=\d{3}(?:\D|$))/g,'').replace(',','.');
+ if(cat)categoria.value=cat;
+ if(val)valore.value=val;
+ return !!(cat&&val);
+}
+
+function startVoice(){
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){
+   statusBox.textContent='⚠️ Riconoscimento vocale non disponibile. Usa Chrome su Android e apri la pagina tramite HTTPS.';
+   statusBox.className='status warn'; return;
+ }
+ if(listening)return;
+ recognition=new SR(); recognition.lang='it-IT'; recognition.continuous=false;
+ recognition.interimResults=true; recognition.maxAlternatives=1;
+ gotResult=false; listening=true;
+ voiceBtn.classList.add('hidden');stopBtn.classList.remove('hidden');
+ statusBox.textContent='🎙️ Ascolto… parla adesso.';
+ statusBox.className='status listen';
+ recognition.onstart=()=>{statusBox.textContent='🎙️ Microfono attivo.\nDi’: «Carburante, 63 euro»';};
+ recognition.onresult=(e)=>{
+   let finalText='',interim='';
+   for(let i=e.resultIndex;i<e.results.length;i++){
+     if(e.results[i].isFinal)finalText+=e.results[i][0].transcript;
+     else interim+=e.results[i][0].transcript;
+   }
+   const text=(finalText||interim).trim();
+   if(text)statusBox.textContent='🗣️ '+text;
+   if(finalText){
+     gotResult=true; parseComando(finalText);
+     statusBox.textContent='🗣️ Riconosciuto: «'+finalText+'»';
+   }
+ };
+ recognition.onerror=(e)=>{
+   listening=false;voiceBtn.classList.remove('hidden');stopBtn.classList.add('hidden');
+   let msg=e.error==='not-allowed'?'Permesso microfono negato. Controlla i permessi di Chrome.':
+           e.error==='no-speech'?'Non ho sentito la voce. Premi PARLA e riprova.':
+           'Errore microfono: '+e.error;
+   statusBox.textContent='⚠️ '+msg;statusBox.className='status warn';
+ };
+ recognition.onend=()=>{
+   listening=false;voiceBtn.classList.remove('hidden');stopBtn.classList.add('hidden');
+   if(!gotResult && statusBox.className.includes('listen')){
+     statusBox.textContent='⚠️ Ascolto terminato senza riconoscere una frase. Riprova.';
+     statusBox.className='status warn';
+   } else if(gotResult) statusBox.className='status ok';
+   recognition=null;
+ };
+ try{recognition.start();}catch(e){listening=false;voiceBtn.classList.remove('hidden');stopBtn.classList.add('hidden');statusBox.textContent='⚠️ Impossibile avviare il microfono. Riprova.';statusBox.className='status warn';}
+}
+function stopVoice(){
+ if(recognition){try{recognition.stop();}catch(e){}}
+}
+voiceBtn.onclick=startVoice;stopBtn.onclick=stopVoice;
+
+function conferma(){
+ const cat=categoria.value.trim(), val=valore.value.trim();
+ if(!cat||!val||isNaN(Number(val))){
+  statusBox.textContent='⚠️ Inserisci categoria e valore numerico.';
+  statusBox.className='status warn';return;
+ }
+ const d=new Date().toLocaleDateString('it-IT');
+ statusBox.textContent='✅ DATI PRONTI\n\nCategoria: '+cat+
+  '\nValore: € '+Number(val).toFixed(2).replace('.',',')+
+  '\nData: '+d+'\nFoto: '+(camera.files[0]?'presente':'non presente')+
+  '\n\nProssimo passo: collegamento a Google Foto e Google Drive.';
+ statusBox.className='status ok';
+}
+function azzera(){
+ if(listening)stopVoice();categoria.value='';valore.value='';camera.value='';
+ preview.style.display='none';preview.removeAttribute('src');
+ statusBox.textContent='In attesa.';statusBox.className='status';
+}
+</script>
+</body>
+</html>
