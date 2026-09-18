@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rimborsi Tasse — Archivio locale</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:auto;padding:16px;background:#f5f5f5;color:#222}
+h1{font-size:25px}.card{background:#fff;padding:16px;border-radius:14px;margin:12px 0;box-shadow:0 1px 5px #ccc}
+label{display:block;font-weight:650;margin-top:12px}
+input,button,textarea{font:inherit;width:100%;box-sizing:border-box;padding:12px;border-radius:9px;border:1px solid #aaa;margin-top:6px}
+button{cursor:pointer}.primary{font-weight:700}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#status{padding:10px;border-radius:9px;background:#eee;margin-top:10px}
+.photo-grid{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.photo{width:105px;position:relative}
+.photo img{width:105px;height:105px;object-fit:cover;border-radius:9px;display:block}
+.photo button{position:absolute;top:3px;right:3px;width:30px;height:30px;padding:0;margin:0;border-radius:50%}
+.small{font-size:13px;color:#666}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.record{border-top:1px solid #ddd;padding:10px 0}.record button{width:auto;padding:6px 10px}
+.notice{font-size:13px;padding:10px;background:#eef5ff;border-radius:9px;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="hint">
+  ⌨️ Inserisci il testo con la tastiera oppure usa il 🎙️ della tastiera del telefono.
+</div>
+
+<h1>Rimborsi Tasse</h1>
+
+<div class="card">
+<label>Nome</label><input id="name" placeholder="es. Mario">
+<label>Categoria</label><input id="category" placeholder="es. Carburante">
+<label>Descrizione <span class="small">(importante)</span></label>
+<textarea id="description" rows="3" placeholder="Descrizione della spesa"></textarea>
+<div class="row">
+<div><label>Importo</label><input id="amount" inputmode="decimal" placeholder="es. 63,60"></div>
+<div><label>Valuta</label><input id="currency" value="EUR"></div>
+</div>
+<label>Data</label><input id="date" type="date">
+</div>
+
+<div class="card">
+<b>Fotografie</b>
+<div class="small">Le fotografie vengono conservate nell'archivio locale dell'app e associate alla stessa spesa.</div>
+<button id="take" class="primary">📷 Scatta foto</button>
+<button id="choose" style="margin-top:8px">🖼️ Scegli foto dal telefono</button>
+<input id="camera" type="file" accept="image/*" capture="environment" hidden>
+<input id="gallery" type="file" accept="image/*" multiple hidden>
+<div id="photos" class="photo-grid"></div>
+</div>
+
+<div class="card">
+<button id="voice" class="primary">🎙️ Dettatura</button>
+<div id="heard" class="small"></div>
+<div class="actions">
+<button id="save" class="primary">💾 Salva spesa</button>
+<button id="new">🧹 Nuova scheda</button>
+</div>
+<div id="status"></div>
+</div>
+
+<div class="card">
+<b>Archivio locale</b>
+<div id="count" class="small"></div>
+<div id="records"></div>
+</div>
+
+<div class="card">
+<b>Trasferimento</b>
+<div class="notice">
+L'archivio è memorizzato localmente nel browser. Con <b>Esporta archivio</b> salvi una copia trasferibile dei dati e delle foto. Il formato ZIP verrà aggiunto nella fase successiva, quando definiremo anche la struttura definitiva per PC/Mac.
+</div>
+<button id="export" class="primary">📦 Esporta archivio</button>
+<button id="csv" style="margin-top:8px">⬇️ Esporta solo CSV</button>
+<button id="clear" style="margin-top:8px">Svuota archivio locale</button>
+</div>
+
+<script>
+const KEY='rimborsi_tasse_local_v5';
+let photos=[],editingId=null;
+const $=id=>document.getElementById(id);
+function pad(n){return String(n).padStart(2,'0')}
+function today(){let d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function data(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return[]}}
+function esc(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function render(){
+ const d=data();$('count').textContent='Registrazioni locali: '+d.length;
+ $('records').innerHTML=d.map(x=>`<div class="record"><b>${esc(x.name)} — ${esc(x.category)} — € ${esc(x.amount)}</b><br>${esc(x.date)} · ${esc(x.description)} · ${(x.photos||[]).length} foto <button onclick="editRecord(${x.id})">Modifica</button></div>`).join('');
+}
+function showPhotos(){
+ $('photos').innerHTML='';
+ photos.forEach((p,i)=>{let box=document.createElement('div');box.className='photo';let im=document.createElement('img');im.src=p.data;let b=document.createElement('button');b.textContent='×';b.onclick=()=>{photos.splice(i,1);showPhotos()};box.append(im,b);$('photos').appendChild(box)});
+}
+function addFiles(files){
+ [...files].forEach(f=>{if(!f.type.startsWith('image/'))return;let r=new FileReader();r.onload=()=>{photos.push({name:f.name||('foto_'+Date.now()+'.jpg'),data:r.result});showPhotos()};r.readAsDataURL(f)});
+}
+$('take').onclick=()=>$('camera').click();
+$('choose').onclick=()=>$('gallery').click();
+$('camera').onchange=e=>{addFiles(e.target.files);e.target.value=''};
+$('gallery').onchange=e=>{addFiles(e.target.files);e.target.value=''};
+$('date').value=today();
+
+function normalizeItalian(s){
+ return s.toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .replace(/[\u2019']/g,'')
+  .replace(/\s+/g,' ').trim();
+}
+function italianNumberWords(s){
+ const u={zero:0,uno:1,una:1,due:2,tre:3,quattro:4,cinque:5,sei:6,sette:7,otto:8,nove:9,
+  dieci:10,undici:11,dodici:12,tredici:13,quattordici:14,quindici:15,sedici:16,
+  diciassette:17,diciotto:18,diciannove:19};
+ const d={venti:20,trenta:30,quaranta:40,cinquanta:50,sessanta:60,settanta:70,ottanta:80,novanta:90};
+ s=normalizeItalian(s).replace(/-/g,' ').trim();
+ if(u[s]!=null)return u[s];
+ if(d[s]!=null)return d[s];
+ const parts=s.split(' ');
+ if(parts.length===2 && d[parts[0]]!=null && u[parts[1]]!=null)
+   return d[parts[0]]+u[parts[1]];
+ const joined=s.replace(/\s+/g,'');
+ for(const tens of Object.keys(d)){
+   if(joined.startsWith(tens) && u[joined.slice(tens.length)]!=null)
+     return d[tens]+u[joined.slice(tens.length)];
+ }
+ return null;
+}
+function parseVoice(t){
+  const original=t;
+  const n=normalizeItalian(t);
+
+  // Ricerca dell'importo. L'ordine è importante:
+  // prima intercettiamo "63 e60 euro", poi le altre forme.
+  let amount=normalizeAmountForSave(null, amountIndex=-1, amountLen=0);
+  let m=n.match(/(\d+)\s*e\s*(\d{1,2})\s*(?:euro|eur|€)\b/);
+  if(m){
+    amount=m[1]+','+String(parseInt(m[2],10)).padStart(2,'0');
+    amountIndex=m.index; amountLen=m[0].length;
+  } else {
+    m=n.match(/€\s*(\d+(?:[.,]\d{1,2})?)/);
+    if(m){
+      amount=m[1].replace('.',',');
+      amountIndex=m.index; amountLen=m[0].length;
+    } else {
+      m=n.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:euro|eur|€)(?:\s+(?:e|virgola)\s*(\d{1,2}))?/);
+      if(m){
+        amount=m[1].replace('.',',');
+        if(m[2] && !/[.,]/.test(m[1])) amount=amount+','+m[2];
+        amountIndex=m.index; amountLen=m[0].length;
+      }
+    }
+  }
+
+  // Chrome può trasformare "sessantatré euro e sessanta" in "63 e 60".
+  if(amount===null){
+    m=n.match(/(\d+(?:[.,]\d{1,2})?)\s+(?:e|virgola)\s*(\d{1,2})(?!\d)/);
+    if(m){
+      amount=m[1].replace('.',',')+','+String(parseInt(m[2],10)).padStart(2,'0');
+      amountIndex=m.index; amountLen=m[0].length;
+    }
+  }
+
+  // Importo scritto in lettere: "sessantatre euro e sessanta".
+  if(amount===null){
+    const wm=n.match(/([a-zàèéìòù]+(?:[ -][a-zàèéìòù]+)?)\s+euro(?:\s+(?:e|virgola)\s+([a-zàèéìòù]+|\d{1,2}))?/);
+    if(wm){
+      const euros=italianNumberWords(wm[1]);
+      if(euros!=null){
+        let cents=null;
+        if(wm[2]) cents=/^\d{1,2}$/.test(wm[2]) ? parseInt(wm[2],10) : italianNumberWords(wm[2]);
+        amount=euros+','+String(cents!=null?cents:0).padStart(2,'0');
+        amountIndex=wm.index; amountLen=wm[0].length;
+      }
+    }
+  }
+
+  // Importo tutto in lettere: "sessantatre e sessanta".
+  if(amount===null){
+    const wm=n.match(/([a-zàèéìòù]+(?:[ -][a-zàèéìòù]+)?)\s+(?:e|virgola)\s+([a-zàèéìòù]+|\d{1,2})/);
+    if(wm){
+      const euros=italianNumberWords(wm[1]);
+      const cents=/^\d{1,2}$/.test(wm[2]) ? parseInt(wm[2],10) : italianNumberWords(wm[2]);
+      if(euros!=null && cents!=null && cents<100){
+        amount=euros+','+String(cents).padStart(2,'0');
+        amountIndex=wm.index; amountLen=wm[0].length;
+      }
+    }
+  }
+
+  if(amount===null)return;
+
+  $('amount').value=amount.replace('.',',');
+
+  // Il testo prima dell'importo viene interpretato come Nome/Categoria.
+  let rawBefore=original.slice(0, Math.max(0, amountIndex)).trim()
+    .replace(/[,:;.-]+/g,' ').replace(/\s+/g,' ').trim();
+  const words=rawBefore ? rawBefore.split(/\s+/) : [];
+
+  if(words.length>=2){
+    $('name').value=words[0];
+    $('category').value=words.slice(1).join(' ');
+  }else if(words.length===1){
+    $('category').value=words[0];
+  }
+}
+let rec=null;
+if(window.SpeechRecognition||window.webkitSpeechRecognition){
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;rec=new SR();rec.lang='it-IT';rec.continuous=false;rec.interimResults=false;
+ rec.onresult=e=>{let t=e.results[0][0].transcript.trim();$('heard').textContent='Ascoltato: '+t;parseVoice(t)};
+ rec.onerror=e=>$('status').textContent='Microfono: '+e.error;
+ rec.onend=()=>{$('voice').textContent='🎙️ Dettatura'};
+ rec.onstart=()=>{$('voice').textContent='⏹️ Ascolto…'};
+ $('voice').onclick=()=>{try{rec.start()}catch(e){rec.stop()}};
+}else $('voice').disabled=true;
+
+function clearForm(){
+ editingId=null;photos=[];showPhotos();
+ ['name','category','description','amount'].forEach(id=>$(id).value='');
+ $('currency').value='EUR';$('date').value=today();$('status').textContent='Nuova scheda pronta.';
+}
+$('new').onclick=clearForm;
+
+$('save').onclick=()=>{
+ let n=$('name').value.trim(),c=$('category').value.trim(),d=$('description').value.trim(),a=$('amount').value.trim(),v=$('currency').value.trim()||'EUR',dt=$('date').value;
+ if(!n||!c||!d||!a||!dt){$('status').textContent='Compila Nome, Categoria, Descrizione, Importo e Data.';return}
+ let arr=data(),idx=arr.findIndex(x=>x.id===editingId),old=idx>=0?arr[idx]:null;
+ let item={id:editingId||Date.now(),name:n,date:dt,time:old?.time||new Date().toTimeString().slice(0,5),category:c,description:d,amount:a.replace('.',','),currency:v,photos:[...photos]};
+ if(idx>=0)arr[idx]=item;else arr.push(item);
+ localStorage.setItem(KEY,JSON.stringify(arr));editingId=null;photos=[];showPhotos();render();
+ $('status').textContent=idx>=0?'Registrazione modificata.':'Spesa salvata localmente.';
+};
+window.editRecord=id=>{
+ let x=data().find(z=>z.id===id);if(!x)return;
+ editingId=id;$('name').value=x.name;$('category').value=x.category;$('description').value=x.description;$('amount').value=x.amount;$('currency').value=x.currency;$('date').value=x.date;
+ photos=x.photos||[];showPhotos();$('status').textContent='Modifica della registrazione selezionata.';window.scrollTo({top:0,behavior:'smooth'});
+};
+function makeCSV(){
+ let d=data(),q=x=>'"'+String(x??'').replaceAll('"','""')+'"';
+ let r=[['ID','Nome','Data','Ora','Categoria','Descrizione','Importo','Valuta','Foto']];
+ d.forEach(x=>r.push([x.id,x.name,x.date,x.time,x.category,x.description,x.amount,x.currency,(x.photos||[]).map(p=>p.name).join('|')]));
+ return '\\ufeff'+r.map(x=>x.map(q).join(';')).join('\\r\\n');
+}
+function download(name,blob){let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+$('csv').onclick=()=>{if(!data().length){$('status').textContent='Nessuna registrazione.';return}download('archivio.csv',new Blob([makeCSV()],{type:'text/csv;charset=utf-8'}));$('status').textContent='CSV esportato.'};
+$('export').onclick=()=>{
+ let d=data();if(!d.length){$('status').textContent='Nessuna registrazione.';return}
+ let payload=btoa(unescape(encodeURIComponent(JSON.stringify(d))));
+ let out='<!doctype html><meta charset="utf-8"><title>Archivio Rimborsi Tasse</title><style>body{font-family:system-ui;max-width:900px;margin:auto;padding:20px}.r{border-top:1px solid #ccc;padding:12px}.p{width:110px;height:110px;object-fit:cover;margin:4px;border-radius:8px}</style><h1>Archivio Rimborsi Tasse</h1><div id="a"></div><script>const d=JSON.parse(decodeURIComponent(escape(atob('+JSON.stringify(payload)+'))));const a=document.getElementById("a");d.forEach(x=>{let r=document.createElement("div");r.className="r";r.innerHTML="<b>"+x.name+" — "+x.category+" — "+x.amount+" "+x.currency+"</b><br>"+x.date+" · "+x.description+"<div>";(x.photos||[]).forEach(p=>{let im=document.createElement("img");im.className="p";im.src=p.data;r.lastChild.appendChild(im)});a.appendChild(r)})<\/script>';
+ download('Rimborsi_Tasse_archivio.html',new Blob([out],{type:'text/html;charset=utf-8'}));
+ $('status').textContent='Archivio completo esportato.';
+};
+$('clear').onclick=()=>{if(confirm('Cancellare tutte le registrazioni locali?')){localStorage.removeItem(KEY);clearForm();render();$('status').textContent='Archivio locale svuotato.'}};
+render();
+
+function normalizeAmountForSave(value){
+  let s = String(value || '').trim().toLowerCase();
+  s = s.replace(/€/g,'').replace(/\beuro\b/g,'').trim();
+
+  // Examples: "63 e 60", "63e60", "63 euro e 60"
+  let m = s.match(/^(\d+)(?:[,.](\d{1,2})|[\s]*e[\s]*(\d{1,2}))$/);
+  if (m) {
+    return m[1] + ',' + (m[2] || m[3]).padStart(2,'0');
+  }
+
+  // Standard decimal point -> Italian decimal comma.
+  if (/^\d+\.\d{1,2}$/.test(s)) return s.replace('.', ',');
+
+  return s;
+}
+
+</script>
+</body></html>
