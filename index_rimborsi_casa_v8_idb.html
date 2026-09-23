@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rimborsi Tasse — Archivio locale (HTTPS)</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:auto;padding:16px;background:#f5f5f5;color:#222}
+h1{font-size:25px}.card{background:#fff;padding:16px;border-radius:14px;margin:12px 0;box-shadow:0 1px 5px #ccc}
+label{display:block;font-weight:650;margin-top:12px}
+input,button,textarea{font:inherit;width:100%;box-sizing:border-box;padding:12px;border-radius:9px;border:1px solid #aaa;margin-top:6px}
+button{cursor:pointer}.primary{font-weight:700}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#status{padding:10px;border-radius:9px;background:#eee;margin-top:10px}
+.photo-grid{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.photo{width:105px;position:relative}
+.photo img{width:105px;height:105px;object-fit:cover;border-radius:9px;display:block}
+.photo button{position:absolute;top:3px;right:3px;width:30px;height:30px;padding:0;margin:0;border-radius:50%}
+.small{font-size:13px;color:#666}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.field-active{outline:2px solid #333;outline-offset:1px}
+.compact-finance-row{display:grid;grid-template-columns:1.35fr .75fr 1fr;gap:8px;align-items:end}
+.compact-finance-row input{padding:10px 8px;font-size:15px}
+#category,#detail{width:100%;padding:12px;font-size:16px;box-sizing:border-box}
+</style>
+
+<style id="layout-adjustment-v4">
+/* Proporzioni campi: Categoria e Dettaglio in evidenza */
+#category, #detail {
+  width:100%;
+  padding:12px;
+  font-size:16px;
+  box-sizing:border-box;
+}
+
+/* Riga compatta per Importo, Valuta e Data */
+.compact-finance-row {
+  display:grid;
+  grid-template-columns: 1.35fr .75fr 1fr;
+  gap:8px;
+  align-items:end;
+}
+.compact-finance-row label {
+  margin-top:12px;
+}
+.compact-finance-row input {
+  padding:10px 8px;
+  font-size:15px;
+}
+@media (max-width:520px){
+  .compact-finance-row {
+    grid-template-columns: 1.2fr .7fr 1fr;
+  }
+}
+</style>
+
+</head>
+<body>
+<h1>Rimborsi Tasse</h1>
+<div class="card">
+<label>Nome</label><input id="name" placeholder="es. Mario">
+<label>Categoria</label>
+<select id="category">
+  <option value="">Seleziona categoria…</option>
+</select>
+
+<label>Dettaglio</label>
+<select id="detail">
+  <option value="">Seleziona prima una categoria…</option>
+</select>
+
+<label>Descrizione <span class="small">(facoltativa)</span></label>
+<textarea id="description" rows="3" placeholder="Descrizione della spesa"></textarea>
+<div class="compact-finance-row">
+<div><label>Importo</label><input id="amount" inputmode="decimal" placeholder="es. 63,60"></div>
+<div><label>Valuta</label><input id="currency" value="EUR"></div>
+<div><label>Data</label><input id="date" type="date"></div>
+</div>
+</div>
+<div class="card">
+<b>Fotografie</b>
+<div class="small">Le fotografie vengono conservate nell'archivio locale dell'app e associate alla stessa spesa.</div>
+<button id="take" class="primary">📷 Scatta foto</button>
+<button id="choose" style="margin-top:8px">🖼️ Scegli foto dal telefono</button>
+<input id="camera" type="file" accept="image/*" capture="environment" hidden>
+<input id="gallery" type="file" accept="image/*" multiple hidden>
+<div id="photos" class="photo-grid"></div>
+</div>
+<div class="card">
+<div class="actions">
+<button id="save" class="primary">💾 Salva spesa</button>
+<button id="new">🧹 Nuova scheda</button>
+</div>
+<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px">
+<button id="manageCategories" type="button" style="width:auto;padding:8px 12px;font-size:14px">⚙️ Gestione Categorie</button>
+<button id="manageDetails" type="button" style="width:auto;padding:8px 12px;font-size:14px">⚙️ Gestione Dettagli</button>
+</div>
+<div id="status"></div>
+</div>
+
+<!-- Gestione archivio: elenco nascosto finché non viene richiesto. -->
+<div class="card">
+<div id="transferSummary" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0">
+  <span id="pendingCount" style="padding:6px 10px;border-radius:12px;background:#fff0bd">🟠 Da trasferire: 0</span>
+  <span id="transferredCount" style="padding:6px 10px;border-radius:12px;background:#dff2df">🟢 Già trasferite: 0</span>
+</div>
+<button id="manageArchive">✏️ Gestisci archivio</button>
+<div id="archiveManager" hidden style="margin-top:12px">
+<b>Archivio locale</b>
+<div id="count" class="small"></div>
+<div id="records"></div>
+</div>
+</div>
+
+<div class="card">
+<b>Trasferimento</b>
+<div class="notice">
+Le registrazioni rimangono sul telefono finché non vengono trasferite. Il comando prepara il pacchetto di trasferimento; nella fase successiva collegheremo questo comando al trasferimento PC/Mac.
+</div>
+
+<button id="deleteTransferred" style="margin-top:8px">🗑️ Cancella dati trasferiti</button>
+<button id="exportZip" class="primary">📤 Trasferisci dati</button>
+<button id="export" style="margin-top:8px">📄 Esporta archivio HTML</button>
+<button id="csv" style="margin-top:8px">⬇️ Esporta solo CSV</button>
+<button id="clear" style="margin-top:8px">Svuota archivio locale</button>
+</div>
+
+<style>
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;padding:16px;overflow:auto}
+.modal-bg.open{display:flex;align-items:flex-start;justify-content:center}
+.modal{background:#fff;border-radius:14px;max-width:760px;width:100%;padding:18px;box-shadow:0 8px 35px rgba(0,0,0,.25)}
+.modal table{width:100%;border-collapse:collapse;margin-top:12px}
+.modal th,.modal td{padding:8px;border-bottom:1px solid #ddd;text-align:left}
+.modal .line{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.modal .line>*{flex:1;min-width:100px}
+.modal .danger{background:#b42318;color:#fff}
+.transfer-badge{display:inline-block;padding:3px 8px;border-radius:10px;font-size:12px;background:#fff0bd}
+.transferred-badge{display:inline-block;padding:3px 8px;border-radius:10px;font-size:12px;background:#dff2df}
+</style>
+
+<div id="categoryModal" class="modal-bg">
+  <div class="modal">
+    <h2>⚙️ Gestione Categorie</h2>
+    <div class="line">
+      <input id="newCategoryName" placeholder="Nome nuova categoria">
+      <button type="button" id="addCategory">➕ Aggiungi</button>
+    </div>
+    <table><thead><tr><th>ID</th><th>Categoria</th><th></th></tr></thead>
+      <tbody id="categoryRows"></tbody>
+    </table>
+    <button type="button" onclick="closeModal('categoryModal')" style="margin-top:12px">Chiudi</button>
+  </div>
+</div>
+
+<div id="detailModal" class="modal-bg">
+  <div class="modal">
+    <h2>⚙️ Gestione Dettagli</h2>
+    <div class="line">
+      <select id="detailCategory"></select>
+      <input id="newDetailName" placeholder="Nome nuovo dettaglio">
+      <select id="newDetailFiscal">
+        <option value="No">No</option>
+        <option value="Sì">Sì</option>
+        <option value="Parziale">Parziale</option>
+        <option value="Da verificare">Da verificare</option>
+      </select>
+      <button type="button" id="addDetail">➕ Aggiungi</button>
+    </div>
+    <table><thead><tr><th>ID</th><th>Categoria</th><th>Dettaglio</th><th>Rilevanza fiscale</th><th></th></tr></thead>
+      <tbody id="detailRows"></tbody>
+    </table>
+    <button type="button" onclick="closeModal('detailModal')" style="margin-top:12px">Chiudi</button>
+  </div>
+</div>
+
+<div id="deleteTransferredModal" class="modal-bg">
+  <div class="modal">
+    <h2>⚠️ Cancella dati trasferiti</h2>
+    <p id="deleteTransferredMessage"></p>
+    <div class="line">
+      <button type="button" onclick="closeModal('deleteTransferredModal')">Annulla</button>
+      <button type="button" class="danger" id="confirmDeleteTransferred">Cancella tutti</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const DB_NAME='RimborsiTasseDB';
+const DB_VERSION=2;
+let db=null;
+let photos=[],editingId=null;
+let recordsCache=[];
+let categoriesCache=[];
+let detailsCache=[];
+let photoCounts=new Map();
+let photoNames=new Map();
+const $=id=>document.getElementById(id);
+
+const defaultCategories=[
+  {id:1,name:'Casa'},{id:2,name:'Auto'},{id:3,name:'Salute'},
+  {id:4,name:'Alimentari'},{id:5,name:'Trasporti'},
+  {id:6,name:'Comunicazioni'},{id:7,name:'Altro'}
+];
+const defaultDetails=[
+  {id:1,categoryId:1,name:'Affitto',fiscal:'No'},
+  {id:2,categoryId:1,name:'Condominio',fiscal:'No'},
+  {id:3,categoryId:1,name:'Manutenzione',fiscal:'Da verificare'},
+  {id:4,categoryId:2,name:'Carburante',fiscal:'No'},
+  {id:5,categoryId:2,name:'Assicurazione',fiscal:'No'},
+  {id:6,categoryId:2,name:'Manutenzione',fiscal:'Da verificare'},
+  {id:7,categoryId:3,name:'Farmaci',fiscal:'Sì'},
+  {id:8,categoryId:3,name:'Visite mediche',fiscal:'Sì'},
+  {id:9,categoryId:3,name:'Esami diagnostici',fiscal:'Sì'},
+  {id:10,categoryId:4,name:'Spesa supermercato',fiscal:'No'},
+  {id:11,categoryId:5,name:'Biglietti',fiscal:'No'},
+  {id:12,categoryId:6,name:'Telefono',fiscal:'No'}
+];
+
+function reqP(req){return new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+function txDone(tx){return new Promise((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('Transazione IndexedDB fallita'));tx.onabort=()=>reject(tx.error||new Error('Transazione IndexedDB annullata'))})}
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const r=indexedDB.open(DB_NAME,DB_VERSION);
+    r.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('registrazioni')) d.createObjectStore('registrazioni',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('fotografie')){
+        const s=d.createObjectStore('fotografie',{keyPath:'key'});
+        s.createIndex('registrazioneId','registrazioneId',{unique:false});
+      }else{
+        const s=e.target.transaction.objectStore('fotografie');
+        if(!s.indexNames.contains('registrazioneId')) s.createIndex('registrazioneId','registrazioneId',{unique:false});
+      }
+      if(!d.objectStoreNames.contains('categorie')) d.createObjectStore('categorie',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('dettagli')){
+        const s=d.createObjectStore('dettagli',{keyPath:'id'});
+        s.createIndex('categoryId','categoryId',{unique:false});
+      }else{
+        const s=e.target.transaction.objectStore('dettagli');
+        if(!s.indexNames.contains('categoryId')) s.createIndex('categoryId','categoryId',{unique:false});
+      }
+      if(!d.objectStoreNames.contains('meta')) d.createObjectStore('meta',{keyPath:'key'});
+    };
+    r.onsuccess=()=>{db=r.result;resolve(db)};
+    r.onerror=()=>reject(r.error||new Error('Impossibile aprire IndexedDB'));
+    r.onblocked=()=>reject(new Error('IndexedDB è bloccato da un’altra scheda aperta dell’app'));
+  });
+}
+async function loadCaches(){
+  recordsCache=await reqP(db.transaction('registrazioni','readonly').objectStore('registrazioni').getAll());
+  categoriesCache=await reqP(db.transaction('categorie','readonly').objectStore('categorie').getAll());
+  detailsCache=await reqP(db.transaction('dettagli','readonly').objectStore('dettagli').getAll());
+  if(!categoriesCache.length){
+    const tx=db.transaction('categorie','readwrite'),s=tx.objectStore('categorie');
+    defaultCategories.forEach(x=>s.put({...x}));
+    await txDone(tx); categoriesCache=defaultCategories.map(x=>({...x}));
+  }
+  if(!detailsCache.length){
+    const tx=db.transaction('dettagli','readwrite'),s=tx.objectStore('dettagli');
+    defaultDetails.forEach(x=>s.put({...x}));
+    await txDone(tx); detailsCache=defaultDetails.map(x=>({...x}));
+  }
+  await refreshPhotoMetadata();
+}
+async function refreshPhotoMetadata(){
+  photoCounts=new Map(); photoNames=new Map();
+  const all=await reqP(db.transaction('fotografie','readonly').objectStore('fotografie').getAll());
+  for(const p of all){
+    const id=String(p.registrazioneId);
+    photoCounts.set(id,(photoCounts.get(id)||0)+1);
+    if(!photoNames.has(id)) photoNames.set(id,[]);
+    photoNames.get(id).push(p.name||'foto.jpg');
+  }
+}
+function getCategories(){return categoriesCache}
+function getDetails(){return detailsCache}
+async function saveCategories(x){
+  const tx=db.transaction('categorie','readwrite'),s=tx.objectStore('categorie');
+  x.forEach(v=>s.put({...v}));
+  for(const old of categoriesCache) if(!x.some(v=>String(v.id)===String(old.id))) s.delete(old.id);
+  await txDone(tx); categoriesCache=x.map(v=>({...v}));
+}
+async function saveDetails(x){
+  const tx=db.transaction('dettagli','readwrite'),s=tx.objectStore('dettagli');
+  x.forEach(v=>s.put({...v}));
+  for(const old of detailsCache) if(!x.some(v=>String(v.id)===String(old.id))) s.delete(old.id);
+  await txDone(tx); detailsCache=x.map(v=>({...v}));
+}
+function data(){return recordsCache}
+function openModal(id){$(id).classList.add('open')}
+function updateTransferSummary(){
+  const rs=data();
+  const pending=rs.filter(x=>!x.trasferita).length;
+  const transferred=rs.filter(x=>x.trasferita).length;
+  const p=$('pendingCount'), t=$('transferredCount');
+  if(p)p.textContent='🟠 Da trasferire: '+pending;
+  if(t)t.textContent='🟢 Già trasferite: '+transferred;
+}
+
+function closeModal(id){$(id).classList.remove('open')}
+function populateCategorySelect(keep){
+  const s=$('category'), cats=getCategories();
+  s.innerHTML='<option value="">Seleziona categoria…</option>'+cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  if(keep!=null && cats.some(c=>String(c.id)===String(keep)))s.value=keep;
+  populateDetailSelect();
+}
+function populateDetailSelect(keep){
+  const s=$('detail');
+  const cid=String($('category').value||'');
+  const ds=getDetails();
+  const wanted=keep==null?'':String(keep);
+  s.innerHTML='<option value="">Seleziona dettaglio…</option>';
+  ds.filter(d=>String(d.categoryId)===cid).forEach(d=>{
+    const o=document.createElement('option');
+    o.value=String(d.id);
+    o.textContent=d.name;
+    s.appendChild(o);
+  });
+  if(wanted && [...s.options].some(o=>o.value===wanted)) s.value=wanted;
+  else s.value='';
+}
+function renderCategoryRows(){
+  $('categoryRows').innerHTML=getCategories().map(c=>
+    `<tr><td>${c.id}</td><td>${esc(c.name)}</td><td><button type="button" class="danger" onclick="removeCategory(${c.id})">Cancella</button></td></tr>`
+  ).join('');
+}
+function renderDetailRows(){
+  const cats=Object.fromEntries(getCategories().map(c=>[c.id,c.name]));
+  $('detailRows').innerHTML=getDetails().map(d=>
+    `<tr><td>${d.id}</td><td>${esc(cats[d.categoryId]||'—')}</td><td>${esc(d.name)}</td><td>${esc(d.fiscal)}</td><td><button type="button" class="danger" onclick="removeDetail(${d.id})">Cancella</button></td></tr>`
+  ).join('');
+}
+function refreshManagement(){
+  populateCategorySelect($('category').value);
+  const s=$('detailCategory');
+  s.innerHTML=getCategories().map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  renderCategoryRows();renderDetailRows();
+}
+window.removeCategory=async function(id){
+  const used=getDetails().some(d=>String(d.categoryId)===String(id));
+  if(used){alert('La categoria ha dettagli associati. Elimina prima i dettagli associati.');return}
+  if(!confirm('Cancellare questa categoria?'))return;
+  await saveCategories(getCategories().filter(c=>String(c.id)!==String(id)));
+  refreshManagement();
+};
+window.removeDetail=async function(id){
+  if(!confirm('Cancellare questo dettaglio?'))return;
+  await saveDetails(getDetails().filter(d=>String(d.id)!==String(id)));
+  refreshManagement();
+};
+function pad(n){return String(n).padStart(2,'0')}
+function today(){let d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function data(){return recordsCache}
+function esc(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function render(){
+  const d=data();
+  const count=$('count'), records=$('records');
+  if(count) count.textContent='Registrazioni locali: '+d.length;
+  if(!records) return;
+  records.innerHTML='';
+  if(!d.length){
+    records.innerHTML='<div class="small" style="margin-top:8px">Nessuna registrazione.</div>';
+    return;
+  }
+  d.slice().reverse().forEach(x=>{
+    const row=document.createElement('div');
+    row.style.cssText='border-top:1px solid #ddd;padding:10px 0';
+    const title=document.createElement('div');
+    title.innerHTML='<b>'+esc(x.name)+' — '+esc(x.category)+' — '+esc(x.detail||'')+' — € '+esc(x.amount)+'</b> '+(x.trasferita?'<span class="transferred-badge">Trasferita</span>':'<span class="transfer-badge">Da trasferire</span>');
+    const info=document.createElement('div');
+    info.className='small';
+    info.textContent=x.date+' · '+(x.description||'')+' · '+(photoCounts.get(String(x.id))||0)+' foto';
+    const b=document.createElement('button');
+    b.textContent='Modifica';
+    b.style.width='auto';
+    b.style.marginTop='6px';
+    b.onclick=()=>window.editRecord(x.id);
+    row.append(title,info,b);
+    records.appendChild(row);
+  });
+}
+async function loadPhotosForRecord(recordId){
+  const tx=db.transaction('fotografie','readonly');
+  const idx=tx.objectStore('fotografie').index('registrazioneId');
+  const list=await reqP(idx.getAll(IDBKeyRange.only(recordId)));
+  list.sort((a,b)=>String(a.key).localeCompare(String(b.key),undefined,{numeric:true}));
+  const out=[];
+  for(const p of list){
+    out.push({name:p.name||'foto.jpg',data:await blobToDataURL(p.blob)});
+  }
+  return out;
+}
+function blobToDataURL(blob){
+  return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob)})
+}
+function dataURLToBlob(dataUrl){
+  const comma=dataUrl.indexOf(',');
+  if(comma<0)return new Blob([],{type:'application/octet-stream'});
+  const meta=dataUrl.slice(0,comma), b64=dataUrl.slice(comma+1);
+  const mime=(meta.match(/^data:([^;]+);/)||[])[1]||'application/octet-stream';
+  const bin=atob(b64), bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return new Blob([bytes],{type:mime});
+}
+async function putRecordAndPhotos(item){
+  const tx=db.transaction(['registrazioni','fotografie'],'readwrite');
+  const rs=tx.objectStore('registrazioni'), ps=tx.objectStore('fotografie'), idx=ps.index('registrazioneId');
+  const oldReq=idx.openCursor(IDBKeyRange.only(item.id));
+  oldReq.onsuccess=()=>{const c=oldReq.result;if(c){c.delete();c.continue();return}
+    const clean={...item}; delete clean.photos; delete clean.photoCount; rs.put(clean);
+    (item.photos||[]).forEach((p,i)=>ps.put({key:String(item.id)+'_'+String(i+1),registrazioneId:item.id,name:p.name||('foto_'+(i+1)+'.jpg'),blob:dataURLToBlob(p.data)}));
+  };
+  await txDone(tx);
+}
+async function deleteRecordAndPhotos(id){
+  const tx=db.transaction(['registrazioni','fotografie'],'readwrite');
+  const rs=tx.objectStore('registrazioni'), ps=tx.objectStore('fotografie'), idx=ps.index('registrazioneId');
+  rs.delete(id);
+  const cur=idx.openCursor(IDBKeyRange.only(id));
+  cur.onsuccess=()=>{const c=cur.result;if(c){c.delete();c.continue()}};
+  await txDone(tx);
+}
+
+function showPhotos(){
+  $('photos').innerHTML='';
+  photos.forEach((p,i)=>{let box=document.createElement('div');box.className='photo';let im=document.createElement('img');im.src=p.data;let b=document.createElement('button');b.textContent='×';b.onclick=()=>{photos.splice(i,1);showPhotos()};box.append(im,b);$('photos').appendChild(box)});
+}
+function addFiles(files){
+  [...files].forEach(f=>{if(!f.type.startsWith('image/'))return;let r=new FileReader();r.onload=()=>{photos.push({name:f.name||('foto_'+Date.now()+'.jpg'),data:r.result});showPhotos()};r.readAsDataURL(f)});
+}
+$('take').onclick=()=>$('camera').click();
+$('choose').onclick=()=>$('gallery').click();
+$('camera').onchange=e=>{addFiles(e.target.files);e.target.value=''};
+$('gallery').onchange=e=>{addFiles(e.target.files);e.target.value=''};
+$('date').value=today();
+
+$('category').addEventListener('change',()=>{ populateDetailSelect(); });
+$('manageCategories').onclick=()=>{refreshManagement();openModal('categoryModal')};
+$('manageDetails').onclick=()=>{refreshManagement();openModal('detailModal')};
+$('addCategory').onclick=async()=>{
+  const name=$('newCategoryName').value.trim(); if(!name)return;
+  const cats=getCategories().slice();
+  if(cats.some(c=>c.name.toLowerCase()===name.toLowerCase())){alert('Categoria già presente.');return}
+  const id=cats.length?Math.max(...cats.map(c=>Number(c.id)))+1:1;
+  cats.push({id,name}); await saveCategories(cats); $('newCategoryName').value=''; refreshManagement();
+};
+$('addDetail').onclick=async()=>{
+  const categoryId=Number($('detailCategory').value), name=$('newDetailName').value.trim(), fiscal=$('newDetailFiscal').value;
+  if(!categoryId||!name)return;
+  const ds=getDetails().slice();
+  if(ds.some(d=>Number(d.categoryId)===categoryId&&d.name.toLowerCase()===name.toLowerCase())){alert('Dettaglio già presente per questa categoria.');return}
+  const id=ds.length?Math.max(...ds.map(d=>Number(d.id)))+1:1;
+  ds.push({id,categoryId,name,fiscal}); await saveDetails(ds); $('newDetailName').value=''; refreshManagement();
+};
+
+function normalizeItalian(s){
+  return s.toLowerCase()
+   .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+   .replace(/[\u2019']/g,'')
+   .replace(/\s+/g,' ').trim();
+}
+function italianNumberWords(s){
+  const u={zero:0,uno:1,una:1,due:2,tre:3,quattro:4,cinque:5,sei:6,sette:7,otto:8,nove:9,
+   dieci:10,undici:11,dodici:12,tredici:13,quattordici:14,quindici:15,sedici:16,
+   diciassette:17,diciotto:18,diciannove:19};
+  const d={venti:20,trenta:30,quaranta:40,cinquanta:50,sessanta:60,settanta:70,ottanta:80,novanta:90};
+  s=normalizeItalian(s).replace(/-/g,' ').trim();
+  if(u[s]!=null)return u[s];
+  if(d[s]!=null)return d[s];
+  const parts=s.split(' ');
+  if(parts.length===2 && d[parts[0]]!=null && u[parts[1]]!=null)
+    return d[parts[0]]+u[parts[1]];
+  const joined=s.replace(/\s+/g,'');
+  for(const tens of Object.keys(d)){
+    if(joined.startsWith(tens) && u[joined.slice(tens.length)]!=null)
+      return d[tens]+u[joined.slice(tens.length)];
+  }
+  return null;
+}
+function parseVoice(t){
+  const original=t;
+  const n=normalizeItalian(t);
+  let amount=null, amountIndex=-1, amountLen=0;
+  let m=n.match(/€\s*(\d+(?:[.,]\d{1,2})?)/);
+  if(m){
+    amount=m[1].replace('.',',');
+    amountIndex=m.index; amountLen=m[0].length;
+  } else {
+    m=n.match(/(\d+(?:[.,]\d{1,2})?)\s*(?:euro|eur|€)(?:\s+(?:e|virgola)\s*(\d{1,2}))?/);
+    if(m){
+      amount=m[1].replace('.',',');
+      if(m[2] && !/[.,]/.test(m[1])) amount=amount+','+m[2];
+      amountIndex=m.index; amountLen=m[0].length;
+    }
+  }
+  if(amount===null){
+    m=n.match(/(\d+(?:[.,]\d{1,2})?)\s+(?:e|virgola)\s*(\d{1,2})(?!\d)/);
+    if(m){
+      amount=m[1].replace('.',',')+','+String(parseInt(m[2],10)).padStart(2,'0');
+      amountIndex=m.index; amountLen=m[0].length;
+    }
+  }
+  if(amount===null){
+    const wm=n.match(/([a-zàèéìòù]+(?:[ -][a-zàèéìòù]+)?)\s+euro(?:\s+(?:e|virgola)\s+([a-zàèéìòù]+|\d{1,2}))?/);
+    if(wm){
+      const euros=italianNumberWords(wm[1]);
+      if(euros!=null){
+        let cents=null;
+        if(wm[2]) cents=/^\d{1,2}$/.test(wm[2]) ? parseInt(wm[2],10) : italianNumberWords(wm[2]);
+        amount=euros+','+String(cents!=null?cents:0).padStart(2,'0');
+        amountIndex=wm.index; amountLen=wm[0].length;
+      }
+    }
+  }
+  if(amount===null){
+    const wm=n.match(/([a-zàèéìòù]+(?:[ -][a-zàèéìòù]+)?)\s+(?:e|virgola)\s+([a-zàèéìòù]+|\d{1,2})/);
+    if(wm){
+      const euros=italianNumberWords(wm[1]);
+      const cents=/^\d{1,2}$/.test(wm[2]) ? parseInt(wm[2],10) : italianNumberWords(wm[2]);
+      if(euros!=null && cents!=null && cents<100){
+        amount=euros+','+String(cents).padStart(2,'0');
+        amountIndex=wm.index; amountLen=wm[0].length;
+      }
+    }
+  }
+  if(amount===null)return;
+  $('amount').value=amount.replace('.',',');
+  let rawBefore=original.slice(0, Math.max(0, amountIndex)).trim()
+    .replace(/[,:;.-]+/g,' ').replace(/\s+/g,' ').trim();
+  const words=rawBefore ? rawBefore.split(' ') : [];
+  if(words.length>=2){
+    $('name').value=words[0];
+    $('category').value=words.slice(1).join(' ');
+  }else if(words.length===1){
+    $('category').value=words[0];
+  }
+}
+
+let activeField=null, fieldRecognition=null, voiceBusy=false;
+const voiceFields=['name','category','detail','description','amount','currency'];
+function activateField(id){
+  activeField=$(id);
+  if(!activeField) return;
+  activeField.classList.add('field-active');
+  if(fieldRecognition && voiceBusy) return;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR) return;
+  try{
+    fieldRecognition=new SR();
+    fieldRecognition.lang='it-IT';
+    fieldRecognition.continuous=false;
+    fieldRecognition.interimResults=false;
+    voiceBusy=true;
+    fieldRecognition.onresult=e=>{
+      const t=e.results[0][0].transcript.trim();
+      if(!activeField) return;
+
+      // I campi Categoria e Dettaglio sono <select>: la voce deve
+      // selezionare una voce esistente, non scrivere testo nel select.
+      if(activeField.id==='category'){
+        const spoken=normalizeItalian(t);
+        const opt=[...activeField.options].find(o=>normalizeItalian(o.textContent)===spoken);
+        if(opt){
+          activeField.value=opt.value;
+          activeField.dispatchEvent(new Event('change',{bubbles:true}));
+        }else{
+          $('status').textContent='Categoria non trovata: "'+t+'".';
+        }
+        return;
+      }
+
+      if(activeField.id==='detail'){
+        const spoken=normalizeItalian(t);
+        const opt=[...activeField.options].find(o=>normalizeItalian(o.textContent)===spoken);
+        if(opt){
+          activeField.value=opt.value;
+          activeField.dispatchEvent(new Event('change',{bubbles:true}));
+        }else{
+          $('status').textContent='Dettaglio non trovato: "'+t+'".';
+        }
+        return;
+      }
+
+      if(activeField.id==='amount') activeField.value=normalizeAmountText(t);
+      else activeField.value=t;
+      activeField.dispatchEvent(new Event('input',{bubbles:true}));
+    };
+    fieldRecognition.onerror=()=>{};
+    fieldRecognition.onend=()=>{voiceBusy=false;fieldRecognition=null;};
+    fieldRecognition.start();
+  }catch(e){ voiceBusy=false; fieldRecognition=null; }
+}
+function normalizeAmountText(v){
+  let s=String(v||'').trim().toLowerCase().replace(/€/g,'').replace(/\beuro\b/g,'').trim();
+  let m=s.match(/^(\d+)(?:[,.](\d{1,2})|\s*e\s*(\d{1,2}))$/);
+  if(m) return m[1]+','+(m[2]||m[3]).padStart(2,'0');
+  m=s.match(/^(\d+)[,.](\d{1,2})$/);
+  if(m) return m[1]+','+m[2].padStart(2,'0');
+  return s;
+}
+voiceFields.forEach(id=>{
+  const el=$(id);
+  if(!el) return;
+  el.addEventListener('focus',()=>activateField(id));
+  el.addEventListener('click',()=>activateField(id));
+  el.addEventListener('blur',()=>el.classList.remove('field-active'));
+});
+$('amount').addEventListener('blur',()=>{$('amount').value=normalizeAmountText($('amount').value)});
+
+function clearForm(){
+  editingId=null;
+  photos=[];
+  showPhotos();
+  $('save').textContent='💾 Salva spesa';
+  $('name').value='';
+  $('category').value='';
+  populateDetailSelect();
+  $('detail').value='';
+  $('description').value='';
+  $('amount').value='';
+  $('currency').value='EUR';
+  $('date').value=today();
+  $('status').textContent='Nuova scheda pronta.';
+}
+$('new').onclick=clearForm;
+$('save').onclick=async()=>{
+  const n=$('name').value.trim();
+  const categoryId=Number($('category').value);
+  const detailId=Number($('detail').value);
+  const cat=getCategories().find(x=>Number(x.id)===categoryId);
+  const detObj=getDetails().find(x=>Number(x.id)===detailId && Number(x.categoryId)===categoryId);
+  const c=cat?.name||'';
+  const det=detObj?.name||'';
+  const d=$('description').value.trim();
+  const a=$('amount').value.trim();
+  const v=$('currency').value.trim()||'EUR';
+  const dt=$('date').value;
+  if(!n||!c||!det||!a||!dt){
+    const missing=[];
+    if(!n)missing.push('Nome');
+    if(!c)missing.push('Categoria');
+    if(!det)missing.push('Dettaglio');
+    if(!a)missing.push('Importo');
+    if(!dt)missing.push('Data');
+    $('status').textContent='Compila: '+missing.join(', ')+'.'; return;
+  }
+  const idx=recordsCache.findIndex(x=>String(x.id)===String(editingId));
+  const old=idx>=0?recordsCache[idx]:null;
+  if(old?.trasferita){$('status').textContent='La registrazione è già stata trasferita e non può essere modificata sul telefono.';return}
+  const item={id:editingId||Date.now(),name:n,date:dt,time:old?.time||new Date().toTimeString().slice(0,5),category:c,categoryId,detail:det,detailId,description:d,amount:a.replace('.',','),currency:v,trasferita:old?.trasferita||false,photos:[...photos]};
+  if(!item.categoryId||!item.detailId){$('status').textContent='Errore interno nei dati Categoria/Dettaglio: registrazione non salvata.';return}
+  try{
+    $('status').textContent='Salvataggio in IndexedDB...';
+    await putRecordAndPhotos(item);
+    const clean={...item}; delete clean.photos;
+    if(idx>=0)recordsCache[idx]=clean; else recordsCache.push(clean);
+    await refreshPhotoMetadata();
+    editingId=item.id; photos=item.photos||[]; showPhotos(); render(); updateTransferSummary();
+    $('save').textContent='💾 Aggiorna spesa';
+    $('status').textContent=idx>=0?'Spesa aggiornata.':'Spesa salvata in IndexedDB.';
+  }catch(e){console.error(e);$('status').textContent='Errore IndexedDB nel salvataggio: '+(e.message||e);}
+};
+$('manageArchive').onclick=()=>{
+  const box=$('archiveManager');
+  box.hidden=!box.hidden;
+  $('manageArchive').textContent=box.hidden?'✏️ Gestisci archivio':'🔼 Nascondi archivio';
+  if(!box.hidden) render();
+};
+
+window.editRecord=async id=>{
+  const x=recordsCache.find(z=>String(z.id)===String(id)); if(!x)return;
+  if(x.trasferita){alert('Questa registrazione è già stata trasferita e può essere modificata solo su PC/Mac.');return}
+  editingId=id; $('name').value=x.name;
+  const cats=getCategories();
+  let editCategoryId=x.categoryId;
+  if(!editCategoryId&&x.category){
+    const cc=cats.find(c=>String(c.name).toLowerCase()===String(x.category).toLowerCase());
+    editCategoryId=cc?.id||'';
+  }
+  $('category').value=editCategoryId||'';
+  populateDetailSelect(x.detailId);
+  let editDetailId=x.detailId;
+  if(!editDetailId&&x.detail){
+    const dd=getDetails().find(d=>String(d.categoryId)===String(editCategoryId)&&String(d.name).toLowerCase()===String(x.detail).toLowerCase());
+    editDetailId=dd?.id||'';
+  }
+  if(editDetailId)populateDetailSelect(editDetailId);
+  $('description').value=x.description||'';
+  $('amount').value=x.amount||'';
+  $('currency').value=x.currency||'EUR';
+  $('date').value=x.date||today();
+  try{photos=await loadPhotosForRecord(x.id)}catch(e){console.error(e);photos=[];$('status').textContent='Impossibile leggere le fotografie: '+(e.message||e)}
+  showPhotos(); $('save').textContent='💾 Aggiorna spesa';
+  $('status').textContent='Modifica della registrazione selezionata.'; window.scrollTo({top:0,behavior:'smooth'});
+};
+function makeCSV(){
+  let d=data(),q=x=>'"'+String(x??'').replaceAll('"','""')+'"';
+  let r=[['ID','Nome','Data','Ora','Categoria','Descrizione','Importo','Valuta','Foto']];
+  d.forEach(x=>r.push([x.id,x.name,x.date,x.time,x.category,x.description,x.amount,x.currency,(photoNames.get(String(x.id))||[]).join('|')]));
+  return '\ufeff'+r.map(x=>x.map(q).join(';')).join('\r\n');
+}
+function download(name,blob){let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+$('csv').onclick=()=>{if(!data().length){$('status').textContent='Nessuna registrazione.';return}download('archivio.csv',new Blob([makeCSV()],{type:'text/csv;charset=utf-8'}));$('status').textContent='CSV esportato.'};
+// ---------- Esportazione ZIP ----------
+function crc32(bytes){
+  let table=crc32.table;
+  if(!table){
+    table=new Uint32Array(256);
+    for(let n=0;n<256;n++){
+      let c=n;
+      for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);
+      table[n]=c>>>0;
+    }
+    crc32.table=table;
+  }
+  let c=0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++) c=table[(c^bytes[i])&255]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+function u16(n){return [n&255,(n>>>8)&255]}
+function u32(n){return [n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]}
+function concatBytes(parts){
+  let total=parts.reduce((s,p)=>s+p.length,0), out=new Uint8Array(total), off=0;
+  for(const p of parts){out.set(p,off);off+=p.length}
+  return out;
+}
+function zipStore(entries){
+  const enc=new TextEncoder(), local=[], central=[], now=new Date();
+  const time=(now.getHours()<<11)|(now.getMinutes()<<5)|Math.floor(now.getSeconds()/2);
+  const date=((now.getFullYear()-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate();
+  let offset=0;
+  for(const e of entries){
+    const name=enc.encode(e.name), data=e.data;
+    const crc=crc32(data);
+    const h=concatBytes([
+      new Uint8Array([0x50,0x4b,0x03,0x04]),new Uint8Array(u16(20)),
+      new Uint8Array(u16(0)),new Uint8Array(u16(0)),new Uint8Array(u16(time)),
+      new Uint8Array(u16(date)),new Uint8Array(u32(crc)),new Uint8Array(u32(data.length)),
+      new Uint8Array(u32(data.length)),new Uint8Array(u16(name.length)),new Uint8Array(u16(0)),name
+    ]);
+    local.push(h,data);
+    central.push(concatBytes([
+      new Uint8Array([0x50,0x4b,0x01,0x02]),new Uint8Array([20,0,20,0]),
+      new Uint8Array(u16(0)),new Uint8Array(u16(0)),new Uint8Array(u16(time)),
+      new Uint8Array(u16(date)),new Uint8Array(u32(crc)),new Uint8Array(u32(data.length)),
+      new Uint8Array(u32(data.length)),new Uint8Array(u16(name.length)),new Uint8Array(u16(0)),
+      new Uint8Array(u16(0)),new Uint8Array(u16(0)),new Uint8Array(u16(0)),
+      new Uint8Array(u32(0)),new Uint8Array(u32(offset)),name
+    ]));
+    offset+=h.length+data.length;
+  }
+  const l=concatBytes(local), c=concatBytes(central);
+  return concatBytes([l,c,concatBytes([
+    new Uint8Array([0x50,0x4b,0x05,0x06]),new Uint8Array(u16(0)),new Uint8Array(u16(0)),
+    new Uint8Array(u16(entries.length)),new Uint8Array(u16(entries.length)),
+    new Uint8Array(u32(c.length)),new Uint8Array(u32(l.length)),new Uint8Array(u16(0))
+  ])]);
+}
+function dataUrlToBytes(dataUrl){
+  const comma=dataUrl.indexOf(',');
+  if(comma<0)return new Uint8Array();
+  const bin=atob(dataUrl.slice(comma+1)), out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
+}
+function safeFileName(s){
+  return String(s||'file').replace(/[<>:"/\\|?*\x00-\x1F]/g,'_').replace(/\s+/g,' ').trim()||'file';
+}
+function buildExportJson(records){
+  return {
+    formato:"rimborsi-tasse-v1",
+    esportato_il:new Date().toISOString(),
+    registrazioni:records.map(x=>({
+      id:x.id,nome:x.name,categoria:x.category,dettaglio:x.detail||'',data:x.date,
+      descrizione:x.description,importo:x.amount,valuta:x.currency,
+      fotografie:(x.photos||[]).map((p,i)=>({
+        indice:i+1,nome_originale:p.name||('foto_'+(i+1)+'.jpg'),
+        file_export:"Foto/"+String(x.id)+"_"+String(i+1)+"_"+safeFileName(p.name||'foto.jpg')
+      }))
+    }))
+  };
+}
+
+$('deleteTransferred').onclick=()=>{
+  const n=data().filter(x=>x.trasferita).length;
+  if(!n){$('status').textContent='Non ci sono dati trasferiti da cancellare.';return}
+  $('deleteTransferredMessage').textContent='Verranno cancellate dal dispositivo '+n+' registrazioni già trasferite e le fotografie associate. I dati sul PC/Mac/NAS non verranno modificati.';
+  openModal('deleteTransferredModal');
+};
+$('confirmDeleteTransferred').onclick=async()=>{
+  const doomed=recordsCache.filter(x=>x.trasferita);
+  try{
+    for(const x of doomed) await deleteRecordAndPhotos(x.id);
+    recordsCache=recordsCache.filter(x=>!x.trasferita);
+    await refreshPhotoMetadata();
+    closeModal('deleteTransferredModal'); render(); updateTransferSummary();
+    $('status').textContent='Dati trasferiti cancellati dal dispositivo.';
+  }catch(e){console.error(e);$('status').textContent='Errore IndexedDB nella cancellazione: '+(e.message||e);}
+};
+
+$('exportZip').onclick=async()=>{
+  const all=recordsCache.slice(), records=all.filter(x=>!x.trasferita);
+  if(!records.length){$('status').textContent='Non ci sono registrazioni da trasferire.';return}
+  try{
+    const enc=new TextEncoder(), entries=[];
+    const exportRecords=[];
+    let fotoCount=0;
+    for(const x of records){
+      const ps=await loadPhotosForRecord(x.id);
+      exportRecords.push({...x,photos:ps});
+      for(let i=0;i<ps.length;i++){
+        const p=ps[i];
+        entries.push({name:'Foto/'+String(x.id)+'_'+String(i+1)+'_'+safeFileName(p.name||('foto_'+(i+1)+'.jpg')),data:dataUrlToBytes(p.data)});
+        fotoCount++;
+      }
+    }
+    entries.unshift({name:'dati.json',data:enc.encode(JSON.stringify(buildExportJson(exportRecords),null,2))});
+    const zip=zipStore(entries);
+    const stamp=new Date();
+    const nome='Rimborsi_'+stamp.getFullYear()+'-'+pad(stamp.getMonth()+1)+'-'+pad(stamp.getDate())+'_'+pad(stamp.getHours())+pad(stamp.getMinutes())+'.zip';
+    download(nome,new Blob([zip],{type:'application/zip'}));
+    const now=new Date().toISOString();
+    const tx=db.transaction('registrazioni','readwrite'),s=tx.objectStore('registrazioni');
+    for(const x of records){const updated={...x,trasferita:true,trasferitaIl:now};s.put(updated)}
+    await txDone(tx);
+    recordsCache=recordsCache.map(x=>records.some(r=>String(r.id)===String(x.id))?{...x,trasferita:true,trasferitaIl:now}:x);
+    render(); updateTransferSummary();
+    $('status').textContent='Pacchetto di trasferimento creato: '+records.length+' registrazioni, '+fotoCount+' fotografie. Le registrazioni sono ora di sola consultazione.';
+  }catch(err){console.error(err);$('status').textContent='Errore durante la creazione del pacchetto di trasferimento: '+(err.message||err);}
+};
+
+$('export').onclick=()=>{
+  let d=data();if(!d.length){$('status').textContent='Nessuna registrazione.';return}
+  let payload=btoa(unescape(encodeURIComponent(JSON.stringify(d))));
+  let out='<!doctype html><meta charset="utf-8"><title>Archivio Rimborsi Tasse</title><h1>Archivio Rimborsi Tasse</h1><div id="a"></div><script>const d=JSON.parse(decodeURIComponent(escape(atob('+JSON.stringify(payload)+'))));const a=document.getElementById("a");d.forEach(x=>{let r=document.createElement("div");r.innerHTML="<b>"+x.name+" — "+x.category+" — "+x.amount+" "+x.currency+"</b><br>"+x.date+" · "+x.description; a.appendChild(r)})<\/script>';
+  download('Rimborsi_Tasse_archivio.html',new Blob([out],{type:'text/html;charset=utf-8'}));
+  $('status').textContent='Archivio HTML esportato.';
+};
+$('clear').onclick=async()=>{
+  if(!confirm('Cancellare tutte le registrazioni locali?'))return;
+  try{
+    const tx=db.transaction(['registrazioni','fotografie'],'readwrite');
+    tx.objectStore('registrazioni').clear(); tx.objectStore('fotografie').clear();
+    await txDone(tx); recordsCache=[]; await refreshPhotoMetadata(); clearForm(); render(); updateTransferSummary();
+    $('status').textContent='Archivio locale svuotato.';
+  }catch(e){console.error(e);$('status').textContent='Errore IndexedDB nella cancellazione: '+(e.message||e);}
+};
+async function initApp(){
+  try{
+    await openDB();
+    await loadCaches();
+    populateCategorySelect(); refreshManagement(); render(); updateTransferSummary();
+    $('status').textContent='Archivio IndexedDB pronto.';
+  }catch(e){
+    console.error(e);
+    $('status').textContent='ERRORE IndexedDB: '+(e.message||e);
+  }
+}
+initApp();
+</script>
+</body></html>
