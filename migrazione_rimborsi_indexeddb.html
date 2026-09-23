@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Migrazione Rimborsi Tasse → IndexedDB</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:0 auto;padding:20px;background:#f5f5f5;color:#222}
+.card{background:#fff;border-radius:14px;padding:20px;box-shadow:0 2px 10px #0001;margin-bottom:16px}
+h1{font-size:22px;margin:0 0 8px}h2{font-size:18px;margin:20px 0 10px}
+button{border:0;border-radius:10px;padding:12px 16px;font-size:16px;cursor:pointer;margin:6px 4px 6px 0}
+#scan{background:#e0e0e0}#migrate{background:#1976d2;color:white}#deleteOld{background:#c62828;color:white}
+button:disabled{opacity:.45;cursor:not-allowed}
+.status{padding:12px;border-radius:10px;background:#f0f0f0;white-space:pre-wrap;line-height:1.5}
+.ok{background:#e8f5e9}.warn{background:#fff8e1}.err{background:#ffebee}
+.row{display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding:8px 0}.row:last-child{border-bottom:0}
+.small{font-size:13px;color:#666}.danger{font-weight:700}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Migrazione Rimborsi Tasse</h1>
+<p>Trasferisce l'archivio dalla <b>localStorage</b> a <b>IndexedDB</b>.</p>
+<p class="small">Questa prima versione NON cancella automaticamente il vecchio archivio. La cancellazione sarà possibile solo dopo una verifica positiva.</p>
+</div>
+
+<div class="card">
+<h2>1. Analisi dell'archivio attuale</h2>
+<div id="scanResult" class="status">Premi «Analizza archivio».</div>
+<button id="scan">🔎 Analizza archivio</button>
+</div>
+
+<div class="card">
+<h2>2. Migrazione</h2>
+<div id="migResult" class="status">La migrazione non è ancora stata eseguita.</div>
+<button id="migrate" disabled>➡️ Migra in IndexedDB</button>
+</div>
+
+<div class="card">
+<h2>3. Verifica</h2>
+<div id="verifyResult" class="status">Nessuna verifica eseguita.</div>
+<button id="verify" disabled>✅ Verifica dati migrati</button>
+</div>
+
+<div class="card">
+<h2>4. Libera la vecchia localStorage</h2>
+<div id="deleteResult" class="status">Questa operazione elimina solo le tre chiavi usate dal vecchio archivio dell'app.</div>
+<button id="deleteOld" disabled>🗑️ Cancella vecchio archivio</button>
+</div>
+
+<script>
+'use strict';
+
+const KEY='rimborsi_tasse_local_v5';
+const CAT_KEY='rimborsi_tasse_categories_v1';
+const DET_KEY='rimborsi_tasse_details_v1';
+const DB_NAME='RimborsiTasseDB';
+const DB_VERSION=1;
+
+let db=null;
+let source=null;
+let lastVerification=null;
+
+const $=id=>document.getElementById(id);
+
+function setBox(id,text,cls='status'){
+  const el=$(id); el.textContent=text; el.className=cls;
+}
+
+function requestToPromise(req){
+  return new Promise((resolve,reject)=>{
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error||new Error('Errore IndexedDB'));
+  });
+}
+
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VERSION);
+    req.onupgradeneeded=()=>{
+      const d=req.result;
+      if(!d.objectStoreNames.contains('registrazioni')){
+        d.createObjectStore('registrazioni',{keyPath:'id'});
+      }
+      if(!d.objectStoreNames.contains('fotografie')){
+        const s=d.createObjectStore('fotografie',{keyPath:'key'});
+        s.createIndex('registrazioneId','registrazioneId',{unique:false});
+      }
+      if(!d.objectStoreNames.contains('categorie')) d.createObjectStore('categorie',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('dettagli')){
+        const s=d.createObjectStore('dettagli',{keyPath:'id'});
+        s.createIndex('categoryId','categoryId',{unique:false});
+      }
+      if(!d.objectStoreNames.contains('meta')) d.createObjectStore('meta',{keyPath:'key'});
+    };
+    req.onsuccess=()=>{db=req.result;resolve(db)};
+    req.onerror=()=>reject(req.error||new Error('Impossibile aprire IndexedDB'));
+    req.onblocked=()=>reject(new Error('IndexedDB è bloccato da un\'altra scheda/app. Chiudi eventuali altre versioni dell\'app e riprova.'));
+  });
+}
+
+function dataUrlToBlob(dataUrl){
+  if(typeof dataUrl!=='string') return null;
+  const comma=dataUrl.indexOf(',');
+  if(comma<0) return null;
+  const header=dataUrl.slice(0,comma);
+  const base64=dataUrl.slice(comma+1);
+  const match=header.match(/^data:([^;]+);base64$/i);
+  if(!match) return null;
+  const bin=atob(base64);
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return new Blob([bytes],{type:match[1]||'application/octet-stream'});
+}
+
+function readSource(){
+  let raw=localStorage.getItem(KEY);
+  if(raw===null) throw new Error('La chiave '+KEY+' non esiste nella localStorage di questa pagina/origine.');
+  let records;
+  try{records=JSON.parse(raw)}catch(e){throw new Error('Il contenuto delle registrazioni non è JSON valido: '+e.message)}
+  if(!Array.isArray(records)) throw new Error('Il contenuto delle registrazioni non è un array.');
+
+  let categories=[];
+  let details=[];
+  const catRaw=localStorage.getItem(CAT_KEY);
+  const detRaw=localStorage.getItem(DET_KEY);
+  if(catRaw!==null){try{categories=JSON.parse(catRaw)||[]}catch(e){throw new Error('Categorie non valide: '+e.message)}}
+  if(detRaw!==null){try{details=JSON.parse(detRaw)||[]}catch(e){throw new Error('Dettagli non validi: '+e.message)}}
+  if(!Array.isArray(categories)||!Array.isArray(details)) throw new Error('Categorie o dettagli non sono array.');
+
+  let photoCount=0, photoBytes=0;
+  for(const r of records){
+    for(const p of (r.photos||[])){
+      if(p && p.data){photoCount++;photoBytes+=p.data.length;}
+    }
+  }
+  return {records,categories,details,photoCount,photoBytes};
+}
+
+function formatMB(chars){return (chars/1024/1024).toFixed(2)+' MiB';}
+
+async function scan(){
+  try{
+    source=readSource();
+    await openDB();
+    const existing=await getAllCounts();
+    setBox('scanResult',
+      'LOCALSTORAGE\n'+
+      'Registrazioni: '+source.records.length+'\n'+
+      'Fotografie: '+source.photoCount+' ('+formatMB(source.photoBytes)+' circa in Base64)\n'+
+      'Categorie: '+source.categories.length+'\n'+
+      'Dettagli: '+source.details.length+'\n\n'+
+      'INDEXEDDB già presente\n'+
+      'Registrazioni: '+existing.records+'\n'+
+      'Fotografie: '+existing.photos+'\n'+
+      'Categorie: '+existing.categories+'\n'+
+      'Dettagli: '+existing.details,
+      'status ok');
+    $('migrate').disabled=false;
+  }catch(e){
+    console.error(e);
+    setBox('scanResult','ERRORE\n'+e.name+': '+e.message,'status err');
+    $('migrate').disabled=true;
+  }
+}
+
+function getAllCounts(){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(['registrazioni','fotografie','categorie','dettagli'],'readonly');
+    const out={};
+    const names=[['registrazioni','records'],['fotografie','photos'],['categorie','categories'],['dettagli','details']];
+    for(const [store,key] of names){
+      const req=tx.objectStore(store).count();
+      req.onsuccess=()=>out[key]=req.result;
+    }
+    tx.oncomplete=()=>resolve(out);
+    tx.onerror=()=>reject(tx.error||new Error('Errore conteggio IndexedDB'));
+  });
+}
+
+async function migrate(){
+  $('migrate').disabled=true;
+  try{
+    if(!source) source=readSource();
+    await openDB();
+    const counts=await getAllCounts();
+    if(counts.records||counts.photos||counts.categories||counts.details){
+      setBox('migResult','IndexedDB contiene già dati. Per sicurezza non sovrascrivo nulla.\nUsa «Verifica dati migrati» per confrontare l\'archivio.','status warn');
+      $('verify').disabled=false;
+      return;
+    }
+
+    setBox('migResult','Migrazione in corso…\nLe fotografie vengono convertite da Base64 a Blob.','status');
+
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(['registrazioni','fotografie','categorie','dettagli','meta'],'readwrite');
+      const rs=tx.objectStore('registrazioni');
+      const ps=tx.objectStore('fotografie');
+      const cs=tx.objectStore('categorie');
+      const ds=tx.objectStore('dettagli');
+      const ms=tx.objectStore('meta');
+
+      try{
+        for(const r of source.records){
+          const copy=Object.assign({},r);
+          delete copy.photos;
+          rs.put(copy);
+          let i=0;
+          for(const p of (r.photos||[])){
+            if(!p || !p.data) continue;
+            const blob=dataUrlToBlob(p.data);
+            if(!blob) throw new Error('Fotografia non convertibile nella registrazione '+r.id+'.');
+            i++;
+            ps.put({
+              key:String(r.id)+'_'+i,
+              registrazioneId:r.id,
+              indice:i,
+              name:p.name||('foto_'+i),
+              type:blob.type,
+              blob
+            });
+          }
+        }
+        for(const c of source.categories) cs.put(c);
+        for(const d of source.details) ds.put(d);
+        ms.put({key:'migration_v1',completedAt:new Date().toISOString(),sourceKey:KEY});
+      }catch(e){
+        try{tx.abort()}catch(_){}
+        reject(e); return;
+      }
+      tx.oncomplete=resolve;
+      tx.onerror=()=>reject(tx.error||new Error('Transazione IndexedDB fallita'));
+      tx.onabort=()=>reject(tx.error||new Error('Transazione IndexedDB annullata'));
+    });
+
+    setBox('migResult','Migrazione completata senza errori di transazione.\nOra esegui la verifica.','status ok');
+    $('verify').disabled=false;
+  }catch(e){
+    console.error(e);
+    setBox('migResult','ERRORE DURANTE LA MIGRAZIONE\n'+e.name+': '+e.message+'\n\nLa localStorage NON è stata modificata.','status err');
+    $('migrate').disabled=false;
+  }
+}
+
+async function verify(){
+  try{
+    if(!source) source=readSource();
+    await openDB();
+    const c=await getAllCounts();
+    const expected={records:source.records.length,photos:source.photoCount,categories:source.categories.length,details:source.details.length};
+    const ok=c.records===expected.records && c.photos===expected.photos && c.categories===expected.categories && c.details===expected.details;
+
+    // Conteggi non bastano: controlliamo anche che ogni registrazione abbia la stessa identità di base.
+    let idCheck=true;
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(['registrazioni'],'readonly');
+      const s=tx.objectStore('registrazioni');
+      const req=s.getAll();
+      req.onsuccess=()=>{
+        const ids=new Set(req.result.map(x=>String(x.id)));
+        for(const r of source.records){if(!ids.has(String(r.id))){idCheck=false;break}}
+      };
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error||new Error('Errore verifica registrazioni'));
+    });
+    const finalOk=ok&&idCheck;
+    lastVerification={ok:finalOk,expected,actual:c};
+
+    setBox('verifyResult',
+      'Atteso / presente in IndexedDB\n'+
+      'Registrazioni: '+expected.records+' / '+c.records+' '+(c.records===expected.records?'✓':'✗')+'\n'+
+      'Fotografie: '+expected.photos+' / '+c.photos+' '+(c.photos===expected.photos?'✓':'✗')+'\n'+
+      'Categorie: '+expected.categories+' / '+c.categories+' '+(c.categories===expected.categories?'✓':'✗')+'\n'+
+      'Dettagli: '+expected.details+' / '+c.details+' '+(c.details===expected.details?'✓':'✗')+'\n'+
+      'Identità registrazioni: '+(idCheck?'OK ✓':'NON COINCIDE ✗')+'\n\n'+
+      (finalOk?'VERIFICA POSITIVA. Il vecchio archivio può ora essere cancellato.':'VERIFICA NEGATIVA. NON cancellare il vecchio archivio.'),
+      finalOk?'status ok':'status err');
+    $('deleteOld').disabled=!finalOk;
+  }catch(e){
+    console.error(e);
+    lastVerification={ok:false};
+    setBox('verifyResult','ERRORE DURANTE LA VERIFICA\n'+e.name+': '+e.message+'\n\nNON cancellare la localStorage.','status err');
+    $('deleteOld').disabled=true;
+  }
+}
+
+async function deleteOld(){
+  if(!lastVerification?.ok){alert('La verifica non è positiva. Il vecchio archivio non verrà cancellato.');return}
+  const ok=confirm('Confermi di voler cancellare dalla localStorage il vecchio archivio?\n\nI dati IndexedDB sono già stati verificati.\n\nQuesta operazione elimina solo:\n• '+KEY+'\n• '+CAT_KEY+'\n• '+DET_KEY);
+  if(!ok)return;
+  try{
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(CAT_KEY);
+    localStorage.removeItem(DET_KEY);
+    const still=localStorage.getItem(KEY);
+    if(still!==null) throw new Error('La chiave principale non è stata cancellata.');
+    setBox('deleteResult','VECCHIO ARCHIVIO CANCELLATO ✓\n\nLa localStorage non contiene più l\'archivio Rimborsi Tasse.\nI dati rimangono in IndexedDB.','status ok');
+    $('deleteOld').disabled=true;
+  }catch(e){
+    console.error(e);
+    setBox('deleteResult','ERRORE DURANTE LA CANCELLAZIONE\n'+e.name+': '+e.message,'status err');
+  }
+}
+
+$('scan').onclick=scan;
+$('migrate').onclick=migrate;
+$('verify').onclick=verify;
+$('deleteOld').onclick=deleteOld;
+
+openDB().catch(e=>setBox('scanResult','IndexedDB non disponibile: '+e.message,'status err'));
+</script>
+</body>
+</html>
