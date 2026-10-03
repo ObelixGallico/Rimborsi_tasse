@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rimborsi Tasse — Archivio locale (V8-IDB-v3 ZIP)</title>
+<title>Rimborsi Tasse — Archivio locale (HTTPS)</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:720px;margin:auto;padding:16px;background:#f5f5f5;color:#222}
 h1{font-size:25px}.card{background:#fff;padding:16px;border-radius:14px;margin:12px 0;box-shadow:0 1px 5px #ccc}
@@ -68,6 +68,14 @@ button{cursor:pointer}.primary{font-weight:700}.row{display:grid;grid-template-c
 
 <label>Descrizione <span class="small">(facoltativa)</span></label>
 <textarea id="description" rows="3" placeholder="Descrizione della spesa"></textarea>
+<label>Rilevanza fiscale</label>
+<select id="fiscalRelevance">
+  <option value="Da verificare">Da verificare</option>
+  <option value="Sì">Sì</option>
+  <option value="No">No</option>
+  <option value="Parziale">Parziale</option>
+</select>
+<div id="fiscalPhotoHint" class="notice" hidden>📷 Per questa spesa è consigliabile allegare la fotografia del documento. Il suggerimento non impedisce il salvataggio.</div>
 <div class="compact-finance-row">
 <div><label>Importo</label><input id="amount" inputmode="decimal" placeholder="es. 63,60"></div>
 <div><label>Valuta</label><input id="currency" value="EUR"></div>
@@ -112,7 +120,7 @@ button{cursor:pointer}.primary{font-weight:700}.row{display:grid;grid-template-c
 <div class="card">
 <b>Trasferimento</b>
 <div class="notice">
-Il comando crea un pacchetto ZIP con le sole registrazioni da trasferire. I dati restano sul telefono e rimangono "Da trasferire" finché non avremo verificato il trasferimento sul PC/Mac.
+Le registrazioni rimangono sul telefono finché non vengono trasferite. Il comando prepara il pacchetto di trasferimento; nella fase successiva collegheremo questo comando al trasferimento PC/Mac.
 </div>
 
 <button id="deleteTransferred" style="margin-top:8px">🗑️ Cancella dati trasferiti</button>
@@ -420,7 +428,8 @@ async function deleteRecordAndPhotos(id){
 
 function showPhotos(){
   $('photos').innerHTML='';
-  photos.forEach((p,i)=>{let box=document.createElement('div');box.className='photo';let im=document.createElement('img');im.src=p.data;let b=document.createElement('button');b.textContent='×';b.onclick=()=>{photos.splice(i,1);showPhotos()};box.append(im,b);$('photos').appendChild(box)});
+  photos.forEach((p,i)=>{let box=document.createElement('div');box.className='photo';let im=document.createElement('img');im.src=p.data;let b=document.createElement('button');b.textContent='×';b.onclick=()=>{photos.splice(i,1);showPhotos();updateFiscalPhotoHint()};box.append(im,b);$('photos').appendChild(box)});
+  updateFiscalPhotoHint();
 }
 function addFiles(files){
   [...files].forEach(f=>{if(!f.type.startsWith('image/'))return;let r=new FileReader();r.onload=()=>{photos.push({name:f.name||('foto_'+Date.now()+'.jpg'),data:r.result});showPhotos()};r.readAsDataURL(f)});
@@ -618,6 +627,12 @@ voiceFields.forEach(id=>{
 });
 $('amount').addEventListener('blur',()=>{$('amount').value=normalizeAmountText($('amount').value)});
 
+function updateFiscalPhotoHint(){
+  const hint=$('fiscalPhotoHint');
+  if(!hint)return;
+  hint.hidden=!($('fiscalRelevance').value==='Sì' && photos.length===0);
+}
+$('fiscalRelevance').addEventListener('change',updateFiscalPhotoHint);
 function clearForm(){
   editingId=null;
   photos=[];
@@ -628,9 +643,11 @@ function clearForm(){
   populateDetailSelect();
   $('detail').value='';
   $('description').value='';
+  $('fiscalRelevance').value='Da verificare';
   $('amount').value='';
   $('currency').value='EUR';
   $('date').value=today();
+  updateFiscalPhotoHint();
   $('status').textContent='Nuova scheda pronta.';
 }
 $('new').onclick=clearForm;
@@ -643,6 +660,7 @@ $('save').onclick=async()=>{
   const c=cat?.name||'';
   const det=detObj?.name||'';
   const d=$('description').value.trim();
+  const fiscalRelevance=$('fiscalRelevance').value||'Da verificare';
   const a=$('amount').value.trim();
   const v=$('currency').value.trim()||'EUR';
   const dt=$('date').value;
@@ -658,7 +676,7 @@ $('save').onclick=async()=>{
   const idx=recordsCache.findIndex(x=>String(x.id)===String(editingId));
   const old=idx>=0?recordsCache[idx]:null;
   if(old?.trasferita){$('status').textContent='La registrazione è già stata trasferita e non può essere modificata sul telefono.';return}
-  const item={id:editingId||Date.now(),name:n,date:dt,time:old?.time||new Date().toTimeString().slice(0,5),category:c,categoryId,detail:det,detailId,description:d,amount:a.replace('.',','),currency:v,trasferita:old?.trasferita||false,photos:[...photos]};
+  const item={id:editingId||Date.now(),name:n,date:dt,time:old?.time||new Date().toTimeString().slice(0,5),category:c,categoryId,detail:det,detailId,description:d,fiscalRelevance,amount:a.replace('.',','),currency:v,trasferita:old?.trasferita||false,photos:[...photos]};
   if(!item.categoryId||!item.detailId){$('status').textContent='Errore interno nei dati Categoria/Dettaglio: registrazione non salvata.';return}
   try{
     $('status').textContent='Salvataggio in IndexedDB...';
@@ -666,7 +684,7 @@ $('save').onclick=async()=>{
     const clean={...item}; delete clean.photos;
     if(idx>=0)recordsCache[idx]=clean; else recordsCache.push(clean);
     await refreshPhotoMetadata();
-    editingId=item.id; photos=item.photos||[]; showPhotos(); render(); updateTransferSummary();
+    editingId=item.id; photos=item.photos||[]; showPhotos(); updateFiscalPhotoHint(); render(); updateTransferSummary();
     $('save').textContent='💾 Aggiorna spesa';
     $('status').textContent=idx>=0?'Spesa aggiornata.':'Spesa salvata in IndexedDB.';
   }catch(e){console.error(e);$('status').textContent='Errore IndexedDB nel salvataggio: '+(e.message||e);}
@@ -697,11 +715,12 @@ window.editRecord=async id=>{
   }
   if(editDetailId)populateDetailSelect(editDetailId);
   $('description').value=x.description||'';
+  $('fiscalRelevance').value=x.fiscalRelevance||'Da verificare';
   $('amount').value=x.amount||'';
   $('currency').value=x.currency||'EUR';
   $('date').value=x.date||today();
   try{photos=await loadPhotosForRecord(x.id)}catch(e){console.error(e);photos=[];$('status').textContent='Impossibile leggere le fotografie: '+(e.message||e)}
-  showPhotos(); $('save').textContent='💾 Aggiorna spesa';
+  showPhotos(); updateFiscalPhotoHint(); $('save').textContent='💾 Aggiorna spesa';
   $('status').textContent='Modifica della registrazione selezionata.'; window.scrollTo({top:0,behavior:'smooth'});
 };
 function makeCSV(){
@@ -830,7 +849,13 @@ $('exportZip').onclick=async()=>{
     const stamp=new Date();
     const nome='Rimborsi_'+stamp.getFullYear()+'-'+pad(stamp.getMonth()+1)+'-'+pad(stamp.getDate())+'_'+pad(stamp.getHours())+pad(stamp.getMinutes())+'.zip';
     download(nome,new Blob([zip],{type:'application/zip'}));
-    $('status').textContent='Pacchetto ZIP creato: '+records.length+' registrazioni, '+fotoCount+' fotografie. Le registrazioni restano "Da trasferire" fino alla conferma del trasferimento sul PC/Mac.';
+    const now=new Date().toISOString();
+    const tx=db.transaction('registrazioni','readwrite'),s=tx.objectStore('registrazioni');
+    for(const x of records){const updated={...x,trasferita:true,trasferitaIl:now};s.put(updated)}
+    await txDone(tx);
+    recordsCache=recordsCache.map(x=>records.some(r=>String(r.id)===String(x.id))?{...x,trasferita:true,trasferitaIl:now}:x);
+    render(); updateTransferSummary();
+    $('status').textContent='Pacchetto di trasferimento creato: '+records.length+' registrazioni, '+fotoCount+' fotografie. Le registrazioni sono ora di sola consultazione.';
   }catch(err){console.error(err);$('status').textContent='Errore durante la creazione del pacchetto di trasferimento: '+(err.message||err);}
 };
 
