@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnostica OAuth 2 — Spese-Rimborsi</title>
+<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:auto;padding:18px;line-height:1.45;color:#222}.card{border:1px solid #ccc;border-radius:12px;padding:16px;margin:14px 0}button{font:inherit;padding:12px 16px;border-radius:8px;width:100%;margin:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f3f3;padding:12px;border-radius:8px}.small{color:#555;font-size:.92rem}</style>
+<script src="https://accounts.google.com/gsi/client" async defer></script></head>
+<body><h1>Diagnostica OAuth 2 — Spese-Rimborsi</h1><div class="card">
+<p>Test separato con il nuovo Client ID. Non legge l'archivio spese, non crea cartelle e non carica file su Drive.</p>
+<button id="inspect">1. Leggi configurazione</button><pre id="out">Premi “Leggi configurazione”.</pre>
+<button id="oauth">2. Prova autorizzazione Google</button>
+<p class="small">La prova richiede il permesso drive.file e non esegue operazioni su Drive.</p></div>
+<script>
+const GOOGLE_CLIENT_ID='387053884533-41ra4qjg6qdbmg0sbnupc1as1s186gbs.apps.googleusercontent.com';
+const EXPECTED_ORIGIN='https://obelixgallico.github.io';
+const $=id=>document.getElementById(id);
+function report(extra=''){const gis=!!window.google?.accounts?.oauth2;$('out').textContent=[
+'URL pagina: '+location.href,'Origine effettiva: '+location.origin,'Origine attesa: '+EXPECTED_ORIGIN,
+'Origine corrispondente: '+(location.origin===EXPECTED_ORIGIN?'SI':'NO'),
+'Client ID di test: '+GOOGLE_CLIENT_ID,'Google Identity Services caricato: '+(gis?'SI':'NO'),extra].filter(Boolean).join('\n');}
+$('inspect').onclick=()=>report();
+$('oauth').onclick=()=>{if(!window.google?.accounts?.oauth2){report('ERRORE: libreria Google Identity Services non caricata.');return;}
+report('Richiesta OAuth avviata; osserva la risposta Google.');
+const client=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:'https://www.googleapis.com/auth/drive.file',
+callback:resp=>{const msg=resp?.error?'Risposta OAuth: '+resp.error+(resp.error_description?' — '+resp.error_description:''):'OAuth ha restituito un token. Nessuna operazione su Drive è stata eseguita.';report(msg);},
+error_callback:err=>report('Errore finestra OAuth: '+(err?.message||JSON.stringify(err)))});
+client.requestAccessToken({prompt:'consent'});};
+</script></body></html>
