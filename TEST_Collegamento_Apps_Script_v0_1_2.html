@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spese-Rimborsi — test collegamento servizio centrale</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{color-scheme:light}body{font:16px system-ui,sans-serif;max-width:760px;margin:28px auto;padding:0 18px;line-height:1.55;color:#203b38;background:#eef4f1}h1{font-size:25px;color:#145b55}.card{background:white;border:1px solid #cbdcd6;border-radius:14px;padding:18px;margin:14px 0}label{display:block;font-weight:650;margin:12px 0 6px}input{box-sizing:border-box;width:100%;font:inherit;padding:12px;border:1px solid #aebfba;border-radius:8px}button{font:inherit;padding:13px 18px;border:0;border-radius:9px;background:#145b55;color:white;font-weight:700;margin-top:14px}button:disabled{opacity:.55}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f3f2;padding:14px;border-radius:9px}.note{border-left:4px solid #b7791f;padding:10px 13px;background:#fff8e8}.small{font-size:13px;color:#52635f}
+</style>
+</head>
+<body>
+<h1>Spese-Rimborsi — test collegamento centrale</h1>
+<div class="card">
+<p>Questo controllo verifica soltanto che l'app riesca a comunicare con il servizio Apps Script e a leggere i tre cataloghi.</p>
+<div class="note"><b>Test di sola lettura.</b> Non inserisce, modifica o cancella spese, non crea fogli e non carica fotografie. Il servizio deve essere distribuito come Web App di test e deve avere le scritture disabilitate.</div>
+<label for="endpoint">Indirizzo del servizio Apps Script</label>
+<input id="endpoint" type="url" autocomplete="url" placeholder="https://script.google.com/macros/s/…/exec">
+<button id="start" type="button">Autorizza Google e verifica il collegamento</button>
+<pre id="result">In attesa.</pre>
+<p class="small">Il token OAuth viene trasmesso al servizio esclusivamente tramite HTTPS nel corpo della richiesta. Non viene mostrato né salvato da questa pagina.</p>
+</div>
+<script>
+'use strict';
+const CLIENT_ID='387053884533-41ra4qjg6qdbmg0sbnupc1as1s186gbs.apps.googleusercontent.com';
+const SCOPE='https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email';
+const $=id=>document.getElementById(id);
+function show(message){$('result').textContent=message}
+function getToken(){
+ return new Promise((resolve,reject)=>{
+  if(!window.google?.accounts?.oauth2){reject(new Error('Servizio di accesso Google non ancora pronto. Attendi qualche secondo e riprova.'));return}
+  const client=google.accounts.oauth2.initTokenClient({
+   client_id:CLIENT_ID,scope:SCOPE,
+   callback:r=>r?.access_token?resolve(r.access_token):reject(new Error(r?.error_description||r?.error||'Accesso Google non riuscito')),
+   error_callback:e=>reject(new Error(e?.message||'Accesso Google annullato'))
+  });
+  client.requestAccessToken({prompt:'consent'});
+ });
+}
+function validateEndpoint(value){
+ let u;try{u=new URL(value)}catch{throw new Error('Inserisci un indirizzo Apps Script valido.')}
+ if(u.protocol!=='https:'||u.hostname!=='script.google.com'||!/^\/macros\/s\/[^/]+\/(exec|dev)$/.test(u.pathname)){
+  throw new Error('L’indirizzo deve essere quello di una Web App Apps Script e terminare con /exec oppure /dev.');
+ }
+ return u.href;
+}
+async function callService(endpoint,token){
+ const payload={action:'getConfig',accessToken:token};
+ // text/plain evita il preflight CORS causato da application/json o da header Authorization.
+ const response=await fetch(endpoint,{
+  method:'POST',mode:'cors',redirect:'follow',cache:'no-store',credentials:'omit',
+  headers:{'Content-Type':'text/plain;charset=UTF-8'},
+  body:JSON.stringify(payload)
+ });
+ const raw=await response.text();
+ let data;try{data=JSON.parse(raw)}catch{throw new Error('Il servizio ha risposto, ma non con JSON. Possibile reindirizzamento o autorizzazione Web App non corretti. Risposta HTTP '+response.status+'.')}
+ if(!response.ok)throw new Error('Risposta HTTP '+response.status+'.');
+ if(!data.ok)throw new Error('Il servizio ha rifiutato la richiesta: '+(data.error||'errore non specificato')+' (richiesta '+(data.requestId||'senza ID')+').');
+ if(data.writesEnabled!==false || data.mode!=='read-only-test')throw new Error('Il servizio non dichiara la modalità di sola lettura: test interrotto per sicurezza.');
+ return data;
+}
+$('start').addEventListener('click',async()=>{
+ const button=$('start');button.disabled=true;
+ try{
+  const endpoint=validateEndpoint($('endpoint').value.trim());
+  show('Richiesta autorizzazione Google…');
+  const token=await getToken();
+  show('Contatto il servizio centrale. È una richiesta di sola lettura…');
+  const result=await callService(endpoint,token);
+  const config=result.config||{};
+  const expected=['Categorie','Dettagli','Modalita_Pagamento'];
+  const lines=expected.map(k=>{
+   const n=Array.isArray(config[k])?config[k].length:0;
+   return '• '+k+': '+n+' elementi';
+  });
+  const missing=expected.filter(k=>!Array.isArray(config[k]));
+  if(missing.length)throw new Error('Collegamento riuscito, ma mancano cataloghi: '+missing.join(', '));
+  show('COLLEGAMENTO RIUSCITO.\n\n• Accesso Google autorizzato.\n• Risposta del servizio ricevuta e interpretata.\n• Scritture dichiarate disabilitate dal server.\n'+lines.join('\n')+'\n\nID richiesta: '+(result.requestId||'non disponibile')+'\n\nNessuna spesa è stata scritta o modificata.');
+ }catch(e){
+  const msg=String(e?.message||e);
+  if(/Failed to fetch|NetworkError|Load failed/i.test(msg)){
+   show('COLLEGAMENTO NON VERIFICATO.\nIl browser non è riuscito a leggere la risposta del servizio (possibile problema CORS, URL o autorizzazione del deployment).\n\nDettaglio: '+msg+'\n\nIl test non invia spese e non modifica dati.');
+  }else show('TEST NON COMPLETATO.\n'+msg+'\n\nNessuna spesa è stata scritta o modificata.');
+ }finally{button.disabled=false}
+});
+</script>
+</body>
+</html>
