@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spese-Rimborsi — test scrittura Google Sheets</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{color-scheme:light}
+body{font:16px system-ui,sans-serif;max-width:720px;margin:28px auto;padding:0 18px;line-height:1.55;color:#203b38;background:#eef4f1}
+h1{font-size:26px;color:#145b55}
+.card{background:white;border:1px solid #cbdcd6;border-radius:14px;padding:18px;margin:14px 0}
+button{font:inherit;padding:13px 18px;border:0;border-radius:9px;background:#145b55;color:white;font-weight:700}
+button:disabled{opacity:.55}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f3f2;padding:14px;border-radius:9px}
+.warning{border-left:4px solid #b7791f;padding:10px 13px;background:#fff8e8}
+.small{font-size:13px;color:#52635f}
+</style>
+</head>
+<body>
+<h1>Spese-Rimborsi — prova di scrittura</h1>
+<div class="card">
+<p>Questo test verifica se Google consente anche la scrittura nel foglio centrale.</p>
+<p><b>Non tocca le registrazioni esistenti.</b> Crea un foglio temporaneo con un nome univoco, scrive una sola riga di prova, la rilegge e infine elimina quel foglio temporaneo.</p>
+<div class="warning"><b>Permesso richiesto:</b> Google chiederà l'accesso in lettura e modifica ai fogli Google. È un permesso più ampio di quello usato nel test precedente, necessario per la futura sincronizzazione.</div>
+<p><button id="start">Autorizza e prova la scrittura</button></p>
+<pre id="result">In attesa.</pre>
+<p class="small">Test isolato. Non carica fotografie, non modifica le tabelle Categorie, Dettagli e Modalità di pagamento e non trasferisce spese reali.</p>
+</div>
+<script>
+'use strict';
+const CLIENT_ID='387053884533-41ra4qjg6qdbmg0sbnupc1as1s186gbs.apps.googleusercontent.com';
+const SHEET_ID='1KjCpPXJEiXMcOqoF24tkEeNPRDuBVnnuP3Lhr9OtRNQ';
+const SCOPE='https://www.googleapis.com/auth/spreadsheets';
+const out=document.getElementById('result');
+const button=document.getElementById('start');
+function show(s){out.textContent=s}
+function getToken(){
+ return new Promise((resolve,reject)=>{
+  if(!window.google?.accounts?.oauth2){reject(new Error('Google Identity Services non è ancora pronto. Attendi qualche secondo e riprova.'));return}
+  const client=google.accounts.oauth2.initTokenClient({
+   client_id:CLIENT_ID,scope:SCOPE,
+   callback:r=>r?.access_token?resolve(r.access_token):reject(new Error(r?.error_description||r?.error||'Accesso Google non riuscito')),
+   error_callback:e=>reject(new Error(e?.message||'Accesso Google annullato'))
+  });
+  client.requestAccessToken({prompt:'consent'});
+ });
+}
+async function api(url,token,options={}){
+ const res=await fetch(url,{...options,headers:{Authorization:'Bearer '+token,...(options.headers||{})}});
+ const body=await res.json().catch(()=>({}));
+ if(!res.ok)throw new Error('Google Sheets HTTP '+res.status+': '+(body.error?.message||'errore API'));
+ return body;
+}
+async function batch(token,requests){
+ return api('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_ID+':batchUpdate',token,{
+  method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests})
+ });
+}
+button.addEventListener('click',async()=>{
+ button.disabled=true;
+ let token=null,sheetId=null,title='TEST_CONN_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+ let wrote=false,verified=false,deleted=false;
+ try{
+  show('Richiesta autorizzazione Google…');
+  token=await getToken();
+  show('Creo un foglio temporaneo…');
+  const created=await batch(token,[{addSheet:{properties:{title}}}]);
+  sheetId=created.replies?.[0]?.addSheet?.properties?.sheetId;
+  if(sheetId===undefined||sheetId===null)throw new Error('Google non ha restituito l’ID del foglio temporaneo.');
+  show('Scrivo la riga di prova…');
+  const range=encodeURIComponent("'"+title+"'!A1:C2");
+  await api('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_ID+'/values/'+range+'?valueInputOption=RAW',token,{
+   method:'PUT',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({values:[['TEST TECNICO','Data e ora','Esito'],['SCRITTURA OK',new Date().toISOString(),'PROVA TEMPORANEA']]})
+  });
+  wrote=true;
+  show('Rileggo la riga per verificarla…');
+  const read=await api('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_ID+'/values/'+range,token);
+  verified=read.values?.[1]?.[0]==='SCRITTURA OK' && read.values?.[1]?.[2]==='PROVA TEMPORANEA';
+  if(!verified)throw new Error('La rilettura non coincide con i dati scritti.');
+  show('Verifica riuscita. Elimino il foglio temporaneo…');
+  await batch(token,[{deleteSheet:{sheetId}}]);
+  deleted=true;
+  show('TEST COMPLETATO CON SUCCESSO.\n\n• Accesso Google autorizzato.\n• Foglio temporaneo creato.\n• Riga di prova scritta e riletta correttamente.\n• Foglio temporaneo eliminato.\n\nLe registrazioni e le tre tabelle originali non sono state modificate.');
+ }catch(e){
+  let msg='TEST NON COMPLETATO.\n'+(e?.message||e);
+  if(sheetId!==null && token && !deleted){
+   try{await batch(token,[{deleteSheet:{sheetId}}]);deleted=true;msg+='\n\nIl foglio temporaneo è stato eliminato.'}
+   catch(cleanErr){msg+='\n\nATTENZIONE: non sono riuscito a eliminare il foglio temporaneo "'+title+'". Non contiene spese reali. Va eliminato manualmente dal foglio centrale.'}
+  }else if(wrote&&!deleted){
+   msg+='\n\nATTENZIONE: il foglio temporaneo "'+title+'" potrebbe essere ancora presente. Non contiene spese reali.'
+  }
+  msg+='\n\nNessuna registrazione reale è stata inviata.';
+  show(msg);
+ }finally{button.disabled=false}
+});
+</script>
+</body>
+</html>
