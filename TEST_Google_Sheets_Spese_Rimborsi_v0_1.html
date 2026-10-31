@@ -1,0 +1,28 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spese-Rimborsi — test lettura Google Sheets</title><script src="https://accounts.google.com/gsi/client" async defer></script><style>body{font:16px system-ui;max-width:750px;margin:35px auto;padding:0 18px;line-height:1.55}button{padding:12px 18px;font-size:16px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f2f2;padding:16px;border-radius:8px}small{color:#555}</style></head><body><h1>Spese-Rimborsi — prova di lettura</h1><p>Questa pagina legge soltanto le tre tabelle di configurazione. Non modifica Google Sheets, Drive o i dati locali dell'app.</p><button id="start">Accedi a Google e verifica le tabelle</button><pre id="result">In attesa.</pre><small>Prototipo isolato. Aprire soltanto da un'origine web autorizzata nel client OAuth; il file locale potrebbe non essere accettato da Google.</small><script>
+'use strict';
+const CLIENT_ID='387053884533-41ra4qjg6qdbmg0sbnupc1as1s186gbs.apps.googleusercontent.com';
+const SHEET_ID='1KjCpPXJEiXMcOqoF24tkEeNPRDuBVnnuP3Lhr9OtRNQ';
+const NAMES=['Categorie','Dettagli','Modalita_Pagamento'];
+const out=document.getElementById('result');
+function show(s){out.textContent=s}
+function token(){return new Promise((resolve,reject)=>{
+ if(!window.google?.accounts?.oauth2){reject(new Error('Google Identity Services non disponibile.'));return}
+ const client=google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:'https://www.googleapis.com/auth/spreadsheets.readonly',callback:r=>r?.access_token?resolve(r.access_token):reject(new Error(r?.error_description||r?.error||'Accesso non riuscito')),error_callback:e=>reject(new Error(e?.message||'Accesso annullato'))});
+ client.requestAccessToken({prompt:'consent'});
+})}
+async function readAll(t){
+ const ranges=NAMES.map(n=>encodeURIComponent("'"+n+"'!A1:F1000")).map(x=>'ranges='+x).join('&');
+ const url='https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_ID+'/values:batchGet?'+ranges;
+ const res=await fetch(url,{headers:{Authorization:'Bearer '+t}});
+ const json=await res.json();
+ if(!res.ok)throw new Error('Google Sheets '+res.status+': '+(json.error?.message||'errore'));
+ return json.valueRanges||[];
+}
+document.getElementById('start').addEventListener('click',async()=>{
+ const b=document.getElementById('start');b.disabled=true;show('Richiesta autorizzazione in corso…');
+ try{const t=await token();show('Lettura in corso…');const data=await readAll(t);
+  const report=NAMES.map((name,i)=>{const rows=data[i]?.values||[];return name+': '+Math.max(0,rows.length-1)+' righe dati; intestazioni: '+(rows[0]||[]).join(', ')});
+  show('Lettura completata. Nessun dato modificato.\n\n'+report.join('\n'));
+ }catch(e){show('TEST NON COMPLETATO\n'+e.message+'\nNessun dato modificato.')}finally{b.disabled=false}
+});
+</script></body></html>
